@@ -1,0 +1,53 @@
+{
+  "name": "ai-api-tester-extension",
+  "displayName": "AI API Tester",
+  "description": "Automated API testing extension powered by NestJS and Local AI",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing",
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiApiTester.openDashboard",
+        "title": "AI API Tester: Open Dashboard"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ai-api-tester-sidebar",
+          "title": "AI API Tester",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI API Tester Settings",
+      "properties": {
+        "aiApiTester.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "Base URL of the NestJS backend service."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "tsc -p ./ && npm --prefix webview run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

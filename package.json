@@ -1,0 +1,21 @@
+{
+  "name": "ai-api-tester-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated API testing standalone React Web App powered by NestJS backend, PostgreSQL, and Local AI.",
+  "scripts": {
+    "start:backend": "npm --prefix backend run start:dev",
+    "build:backend": "npm --prefix backend run build",
+    "test:backend": "npm --prefix backend run test",
+    "start:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build",
+    "dev": "npm run start:backend"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

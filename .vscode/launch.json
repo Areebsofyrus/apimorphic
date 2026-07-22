@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch NestJS Backend (Debug)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start:debug"],
+      "port": 9229,
+      "console": "integratedTerminal",
+      "restart": true,
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach to NestJS Backend",
+      "port": 9229,
+      "restart": true,
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "name": "Launch AI API Tester Extension (Legacy)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/extension"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/extension/dist/**/*.js"
+      ]
+    }
+  ]
+}
