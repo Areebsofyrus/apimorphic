@@ -14,44 +14,71 @@ export class AiAnalyzerService {
     });
   }
 
-  private async getActiveModelName(): Promise<string> {
+  async getClientAndModel(geminiApiKey?: string): Promise<{ client: OpenAI; model: string }> {
+    const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const client = new OpenAI({
+          apiKey,
+          baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        });
+        // Test key validity
+        await client.models.list();
+        return {
+          client,
+          model: 'gemini-2.5-flash',
+        };
+      } catch (err: any) {
+        this.logger.warn(`Gemini API key validation failed: ${err.message}. Falling back to local AI.`);
+      }
+    }
+
+    const baseURL = process.env.LOCAL_AI_BASE_URL || 'http://localhost:11434/v1';
+    const client = new OpenAI({
+      baseURL,
+      apiKey: 'local-ai-key',
+    });
+    
     const configuredModel = process.env.LOCAL_AI_MODEL || 'unsloth/gemma-4-E2B-it-GGUF';
     try {
-      if (this.openaiClient) {
-        const list = await this.openaiClient.models.list();
-        const availableModels = list.data.map((m) => m.id);
-
-        if (availableModels.includes(configuredModel)) {
-          return configuredModel;
-        }
-
-        const matched = availableModels.find(
-          (m) =>
-            m.toLowerCase().includes('gemma') ||
-            m.toLowerCase().includes(configuredModel.toLowerCase())
-        );
-        if (matched) return matched;
-
-        if (availableModels.length > 0) {
-          return availableModels[0];
-        }
+      const list = await client.models.list();
+      const availableModels = list.data.map((m) => m.id);
+      if (availableModels.includes(configuredModel)) {
+        return { client, model: configuredModel };
+      }
+      const matched = availableModels.find(
+        (m) =>
+          m.toLowerCase().includes('gemma') ||
+          m.toLowerCase().includes(configuredModel.toLowerCase())
+      );
+      if (matched) return { client, model: matched };
+      if (availableModels.length > 0) {
+        return { client, model: availableModels[0] };
       }
     } catch {
       // Fallback
     }
-    return configuredModel;
+    return { client, model: configuredModel };
   }
 
-  async analyzeFailure(params: {
-    endpoint: string;
-    method: string;
-    scenarioName: string;
-    statusCode: number;
-    requestPayload: Record<string, unknown>;
-    responseBody?: Record<string, unknown>;
-  }): Promise<string> {
+  async getActiveModelName(geminiApiKey?: string): Promise<string> {
+    const { model } = await this.getClientAndModel(geminiApiKey);
+    return model;
+  }
+
+  async analyzeFailure(
+    params: {
+      endpoint: string;
+      method: string;
+      scenarioName: string;
+      statusCode: number;
+      requestPayload: Record<string, unknown>;
+      responseBody?: Record<string, unknown>;
+    },
+    geminiApiKey?: string,
+  ): Promise<string> {
     try {
-      const model = await this.getActiveModelName();
+      const { client, model } = await this.getClientAndModel(geminiApiKey);
       const prompt = `Analyze this API test failure and provide a 2-sentence concise root cause diagnosis and fix suggestion:
 Endpoint: ${params.method} ${params.endpoint}
 Scenario: ${params.scenarioName}
@@ -59,7 +86,7 @@ Status Code: ${params.statusCode}
 Request Payload: ${JSON.stringify(params.requestPayload)}
 Response Body: ${JSON.stringify(params.responseBody || {})}`;
 
-      const response = await this.openaiClient?.chat.completions.create({
+      const response = await client.chat.completions.create({
         model,
         messages: [
           { role: 'system', content: 'You are an expert API debugging AI.' },
@@ -68,9 +95,9 @@ Response Body: ${JSON.stringify(params.responseBody || {})}`;
         temperature: 0.3,
       });
 
-      return response?.choices[0]?.message?.content || 'Local AI analysis unavailable.';
+      return response?.choices[0]?.message?.content || 'AI analysis unavailable.';
     } catch (error: any) {
-      this.logger.warn(`Local AI diagnosis warning: ${error.message}`);
+      this.logger.warn(`AI diagnosis warning: ${error.message}`);
       return `Failed with status ${params.statusCode}. Verify request schema parameters and authentication headers.`;
     }
   }

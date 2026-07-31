@@ -4,6 +4,13 @@ export interface Endpoint {
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
   summary: string;
   requestSchema?: any;
+  parameters?: Array<{
+    name: string;
+    in: 'query' | 'header' | 'path' | 'cookie' | 'body';
+    required?: boolean;
+    schema?: any;
+  }>;
+  baseUrl?: string;
 }
 
 export interface ParsedSpec {
@@ -14,10 +21,17 @@ export interface ParsedSpec {
 }
 
 export interface Scenario {
+  id?: string;
   scenarioName: string;
   generationRule: string;
   expectedResult: string;
   payload: any;
+  priority?: string;
+  category?: string;
+  description?: string;
+  assertions?: string[];
+  pathParams?: Record<string, string>;
+  queryParams?: Record<string, string>;
 }
 
 export interface ExecutionResult {
@@ -26,10 +40,11 @@ export interface ExecutionResult {
   statusCode: number;
   responseTimeMs: number;
   passed: boolean;
-  schemaValid: boolean;
+  schemaValid?: boolean;
   requestPayload: any;
   responseBody: any;
   aiExplanation?: string;
+  aiModel?: string;
 }
 
 export interface DatasetRow {

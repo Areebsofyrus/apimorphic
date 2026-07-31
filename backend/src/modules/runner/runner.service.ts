@@ -13,12 +13,14 @@ export interface ExecutionRequest {
   responseSchema?: Record<string, unknown>;
   scenarioName?: string;
   generationRule?: string;
+  expectedResult?: string;
   prerequisites?: Array<{
     method: string;
     endpoint: string;
     payload?: Record<string, unknown>;
     extractVariableKey?: string;
   }>;
+  geminiApiKey?: string;
 }
 
 export interface ExecutionResponse {
@@ -31,6 +33,33 @@ export interface ExecutionResponse {
   requestPayload: Record<string, unknown>;
   responseBody: Record<string, unknown>;
   aiExplanation?: string;
+  aiModel?: string;
+}
+
+function isStatusMatchingExpected(actualStatus: number, expected: string | undefined): boolean {
+  if (!expected) {
+    return actualStatus >= 200 && actualStatus < 300;
+  }
+  
+  // Find any 3-digit status code (e.g. 401, 400, 200) in the expected result string
+  const statusMatch = expected.match(/\b\d{3}\b/);
+  if (statusMatch) {
+    const expectedCode = parseInt(statusMatch[0], 10);
+    return actualStatus === expectedCode;
+  }
+
+  const normalized = expected.toLowerCase();
+  if (normalized.includes('success') || normalized.includes('ok') || normalized.includes('2xx')) {
+    return actualStatus >= 200 && actualStatus < 300;
+  }
+  if (normalized.includes('fail') || normalized.includes('error') || normalized.includes('invalid') || normalized.includes('bad')) {
+    return actualStatus >= 400;
+  }
+  if (normalized.includes('unauthorized') || normalized.includes('auth')) {
+    return actualStatus === 401 || actualStatus === 403;
+  }
+
+  return actualStatus >= 200 && actualStatus < 300;
 }
 
 @Injectable()
@@ -99,7 +128,23 @@ export class RunnerService {
         }
       }
 
-      const passed = response.status >= 200 && response.status < 300 && schemaValid;
+      const matchedExpectation = isStatusMatchingExpected(response.status, req.expectedResult);
+      const passed = matchedExpectation && schemaValid;
+
+      let aiExplanation: string | undefined = undefined;
+      let aiModel: string | undefined = undefined;
+
+      if (!passed) {
+        aiExplanation = await this.aiAnalyzerService.analyzeFailure({
+          endpoint: req.endpoint,
+          method: req.method,
+          scenarioName,
+          statusCode: response.status,
+          requestPayload: req.payload || {},
+          responseBody,
+        }, req.geminiApiKey);
+        aiModel = await this.aiAnalyzerService.getActiveModelName(req.geminiApiKey);
+      }
 
       return {
         scenarioName,
@@ -110,6 +155,8 @@ export class RunnerService {
         schemaValid,
         requestPayload: req.payload || {},
         responseBody,
+        aiExplanation,
+        aiModel,
       };
     } catch (error: any) {
       console.error('[RunnerService] Axios execution error:', error.message);
@@ -121,25 +168,34 @@ export class RunnerService {
       const statusCode = error.response?.status || 500;
       const responseBody = error.response?.data || { error: error.message };
 
-      const aiExplanation = await this.aiAnalyzerService.analyzeFailure({
-        endpoint: req.endpoint,
-        method: req.method,
-        scenarioName,
-        statusCode,
-        requestPayload: req.payload || {},
-        responseBody,
-      });
+      const matchedExpectation = isStatusMatchingExpected(statusCode, req.expectedResult);
+
+      let aiExplanation: string | undefined = undefined;
+      let aiModel: string | undefined = undefined;
+
+      if (!matchedExpectation) {
+        aiExplanation = await this.aiAnalyzerService.analyzeFailure({
+          endpoint: req.endpoint,
+          method: req.method,
+          scenarioName,
+          statusCode,
+          requestPayload: req.payload || {},
+          responseBody,
+        }, req.geminiApiKey);
+        aiModel = await this.aiAnalyzerService.getActiveModelName(req.geminiApiKey);
+      }
 
       return {
         scenarioName,
         generationRule,
         statusCode,
         responseTimeMs,
-        passed: false,
-        schemaValid: false,
+        passed: matchedExpectation,
+        schemaValid: matchedExpectation,
         requestPayload: req.payload || {},
         responseBody,
         aiExplanation,
+        aiModel,
       };
     }
   }
@@ -148,5 +204,8 @@ export class RunnerService {
     const limit = pLimit(concurrency);
     const tasks = requests.map((req) => limit(() => this.executeTest(req)));
     return Promise.all(tasks);
+  }
+  async getActiveModel(geminiApiKey?: string): Promise<string> {
+    return this.aiAnalyzerService.getActiveModelName(geminiApiKey);
   }
 }

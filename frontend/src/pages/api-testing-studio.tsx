@@ -5,9 +5,11 @@ import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, Play, PlayCircle, Trash2, Loader2, Cpu, Sparkles, Terminal, PlusCircle, Save, Settings, Key, History } from 'lucide-react';
+import { VariableInput, VariableTextarea } from '@/components/ui/variable-input';
+import { Badge } from '@/components/ui/badge';
+import { Search, Play, PlayCircle, Trash2, Loader2, Cpu, Sparkles, Terminal, PlusCircle, Save, Settings, Key, History, Eye, EyeOff, Database } from 'lucide-react';
 import { EndpointCard } from '@/components/endpoint-card';
-import { ScenarioCard } from '@/components/scenario-card';
+import { ScenarioCard, HTTP_STATUS_DESCRIPTIONS } from '@/components/scenario-card';
 import { ExecutionResultCard } from '@/components/execution-result-card';
 import { MethodBadge } from '@/components/method-badge';
 import { Endpoint, Scenario, ExecutionResult } from '@/types/api';
@@ -15,7 +17,7 @@ import { MOCK_SCENARIOS } from '@/lib/mock-data';
 import { executeTest, generateScenarios, fetchMappings, fetchDatasets, fetchCustomScenarios, saveCustomScenario, deleteCustomScenario, updateWorkspaceBaseUrl, fetchEndpointHistory, clearEndpointHistory, deleteExecutionLog } from '@/lib/api-client';
 import { toast } from 'sonner';
 
-const DEFAULT_BASE_URL = import.meta.env.VITE_TARGET_BASE_URL ?? 'https://httpbin.org';
+const DEFAULT_BASE_URL = (import.meta as any).env.VITE_TARGET_BASE_URL ?? 'https://httpbin.org';
 
 const parseHeaders = (headersStr: string): Record<string, string> => {
   if (!headersStr || !headersStr.trim()) return {};
@@ -95,12 +97,90 @@ const generateExampleFromSchema = (schema: any): string => {
   return JSON.stringify(example, null, 2);
 };
 
+const extractPathParams = (endpoint: Endpoint | null): string[] => {
+  if (!endpoint) return [];
+  if (endpoint.parameters) {
+    const fromParams = endpoint.parameters
+      .filter(p => p.in === 'path')
+      .map(p => p.name);
+    if (fromParams.length > 0) return fromParams;
+  }
+  const curlyMatches = (endpoint.path.match(/\{([^}]+)\}/g) || []).map(m => m.slice(1, -1));
+  const colonMatches = (endpoint.path.match(/:([a-zA-Z0-9_]+)/g) || []).map(m => m.slice(1));
+  return Array.from(new Set([...curlyMatches, ...colonMatches]));
+};
+
+const extractQueryParams = (endpoint: Endpoint | null): string[] => {
+  if (!endpoint || !endpoint.parameters) return [];
+  return endpoint.parameters
+    .filter(p => p.in === 'query')
+    .map(p => p.name);
+};
+
+const resolveEndpointPath = (
+  path: string,
+  pathParams: Record<string, string> = {},
+  queryParams: Record<string, string> = {},
+  profileVars: Record<string, string> = {}
+): string => {
+  if (!path) return path;
+  let result = path;
+  
+  // 1. Substitute Path UI overrides first
+  Object.entries(pathParams).forEach(([key, val]) => {
+    if (val) {
+      result = result.split(`{${key}}`).join(val);
+      result = result.split(`:${key}`).join(val);
+    }
+  });
+  
+  // 2. Substitute profile variables next
+  Object.entries(profileVars).forEach(([key, val]) => {
+    result = result.split(`{${key}}`).join(String(val));
+    result = result.split(`:${key}`).join(String(val));
+    result = result.split(`{{${key}}}`).join(String(val));
+  });
+
+  // 3. Gather query parameters
+  const qParams: string[] = [];
+  Object.entries(queryParams).forEach(([key, val]) => {
+    const finalVal = val !== undefined && val !== '' ? val : (profileVars[key] || '');
+    if (finalVal) {
+      qParams.push(`${encodeURIComponent(key)}=${encodeURIComponent(finalVal)}`);
+    }
+  });
+
+  if (qParams.length > 0) {
+    const separator = result.includes('?') ? '&' : '?';
+    result = `${result}${separator}${qParams.join('&')}`;
+  }
+  
+  return result;
+};
+
 interface ApiTestingStudioProps {
   endpoints: Endpoint[];
   aiModel?: string;
   specId?: string;
   selectedEndpointId: string | null;
   onSelectedEndpointIdChange: (id: string | null) => void;
+  geminiApiKey: string;
+  profiles: Array<{ name: string; variables: Record<string, string> }>;
+  activeProfileName: string;
+  onProfilesChange: (profiles: Array<{ name: string; variables: Record<string, string> }>) => void;
+  workspaceConfig?: {
+    baseUrl?: string;
+    authToken?: string;
+    customHeaders?: string;
+    preMethod?: 'GET' | 'POST';
+    preEndpoint?: string;
+    prePayload?: string;
+    preExtractKey?: string;
+    runPreEverytime?: boolean;
+    showSettings?: boolean;
+  };
+  onWorkspaceConfigChange?: (config: any) => void;
+  globalVariables?: Record<string, string>;
 }
 
 export default function ApiTestingStudio({
@@ -109,9 +189,17 @@ export default function ApiTestingStudio({
   specId,
   selectedEndpointId,
   onSelectedEndpointIdChange,
+  geminiApiKey,
+  profiles = [],
+  activeProfileName = '',
+  onProfilesChange,
+  workspaceConfig,
+  onWorkspaceConfigChange,
+  globalVariables = {},
 }: ApiTestingStudioProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
+  const [sidebarWidth, setSidebarWidth] = useState(320);
   
   const selectedEndpoint = endpoints.find(e => e.id === selectedEndpointId) || endpoints[0] || null;
   const setSelectedEndpoint = (endpoint: Endpoint | null) => {
@@ -123,16 +211,77 @@ export default function ApiTestingStudio({
   const [isScenariosLoading, setIsScenariosLoading] = useState(false);
   const [selectedScenarios, setSelectedScenarios] = useState<Set<string>>(new Set());
   const [customPayload, setCustomPayload] = useState('{\n  \n}');
-  const [executionResults, setExecutionResults] = useState<ExecutionResult[]>([]);
+  const [executionResultsCache, setExecutionResultsCache] = useState<Record<string, ExecutionResult[]>>({});
+  const executionResults = selectedEndpoint ? (executionResultsCache[selectedEndpoint.id] || []) : [];
   const [isExecuting, setIsExecuting] = useState(false);
   const [consoleTab, setConsoleTab] = useState<'active' | 'history'>('active');
   const [historyResults, setHistoryResults] = useState<any[]>([]);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const lastLoadedSpecIdRef = useRef<string | null>(null);
+
+  const activeProfile = profiles.find(p => p.name === activeProfileName);
+  const vars = {
+    ...(globalVariables || {}),
+    ...(activeProfile ? activeProfile.variables : {}),
+  };
+
+  const substitute = (text: string): string => {
+    if (!text) return text;
+    let result = text;
+    Object.entries(vars).forEach(([key, value]) => {
+      const placeholder = `{{${key}}}`;
+      result = result.split(placeholder).join(String(value));
+    });
+    return result;
+  };
+
+  const resolvePayload = (payload: any): any => {
+    if (!payload) return payload;
+    try {
+      const str = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      return JSON.parse(substitute(str));
+    } catch {
+      return payload;
+    }
+  };
+
+  const resolveHeaders = (headers: Record<string, string>): Record<string, string> => {
+    if (!headers) return headers;
+    const result: Record<string, string> = {};
+    Object.entries(headers).forEach(([k, v]) => {
+      result[k] = substitute(v);
+    });
+    return result;
+  };
+
+  const updateGeneratedScenarios = (updater: Scenario[] | ((prev: Scenario[]) => Scenario[])) => {
+    if (!selectedEndpoint) return;
+    const endpointId = selectedEndpoint.id;
+    setGeneratedScenarios((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      setGeneratedScenariosCache((cache) => ({
+        ...cache,
+        [endpointId]: next,
+      }));
+      return next;
+    });
+  };
+
+  const updateCustomPayload = (val: string) => {
+    if (!selectedEndpoint) return;
+    const endpointId = selectedEndpoint.id;
+    setCustomPayload(val);
+    setCustomPayloadCache((cache) => ({
+      ...cache,
+      [endpointId]: val,
+    }));
+  };
 
   const loadEndpointHistory = async (path: string, method: string) => {
+    if (!specId) return;
     setIsHistoryLoading(true);
     try {
-      const logs = await fetchEndpointHistory(path, method);
+      const logs = await fetchEndpointHistory(path, method, specId);
       setHistoryResults(logs || []);
     } catch {
       // Ignore background error
@@ -149,13 +298,25 @@ export default function ApiTestingStudio({
   const [mappings, setMappings] = useState<any[]>([]);
   const [datasets, setDatasets] = useState<any[]>([]);
   const [generatedScenarios, setGeneratedScenarios] = useState<Scenario[]>([]);
+  const [generatedScenariosCache, setGeneratedScenariosCache] = useState<Record<string, Scenario[]>>({});
+  const [customPayloadCache, setCustomPayloadCache] = useState<Record<string, string>>({});
+  const [pathParams, setPathParams] = useState<Record<string, string>>({});
+  const [queryParams, setQueryParams] = useState<Record<string, string>>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [newScenarioName, setNewScenarioName] = useState('');
   const [newExpectedResult, setNewExpectedResult] = useState('');
   const [editingScenario, setEditingScenario] = useState<Scenario | null>(null);
+  const [showParams, setShowParams] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('studio_show_params');
+      return saved !== 'false';
+    }
+    return true;
+  });
   
   const [showSettings, setShowSettings] = useState(false);
   const [authToken, setAuthToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
   const [customHeaders, setCustomHeaders] = useState('');
   const [preMethod, setPreMethod] = useState<'POST' | 'GET'>('POST');
   const [preEndpoint, setPreEndpoint] = useState('');
@@ -163,66 +324,68 @@ export default function ApiTestingStudio({
   const [preExtractKey, setPreExtractKey] = useState('access_token');
   const [runPreEverytime, setRunPreEverytime] = useState(false);
 
-  // Sync state values when specId changes
+  // Sync state values when specId/workspaceConfig changes
   useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    const savedBaseUrl = localStorage.getItem(`tester_baseUrl${suffix}`);
-    setBaseUrl(savedBaseUrl ?? (endpoints[0]?.baseUrl || DEFAULT_BASE_URL));
-    setAuthToken(localStorage.getItem(`tester_authToken${suffix}`) ?? '');
-    setCustomHeaders(localStorage.getItem(`tester_customHeaders${suffix}`) ?? '');
-    setPreMethod((localStorage.getItem(`tester_preMethod${suffix}`) as 'POST' | 'GET') ?? 'POST');
-    setPreEndpoint(localStorage.getItem(`tester_preEndpoint${suffix}`) ?? '');
-    setPrePayload(localStorage.getItem(`tester_prePayload${suffix}`) ?? '{\n  "username": "admin",\n  "password": "password"\n}');
-    setPreExtractKey(localStorage.getItem(`tester_preExtractKey${suffix}`) ?? 'access_token');
-    setRunPreEverytime(localStorage.getItem(`tester_runPreEverytime${suffix}`) === 'true');
-    setShowSettings(localStorage.getItem(`tester_showSettings${suffix}`) === 'true');
-  }, [specId, endpoints]);
+    if (!specId) {
+      lastLoadedSpecIdRef.current = null;
+      return;
+    }
 
-  // Sync changes back to localStorage
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_baseUrl${suffix}`, baseUrl);
-  }, [baseUrl, specId]);
+    // Only sync values from configuration when switching workspace specs
+    if (lastLoadedSpecIdRef.current !== specId && workspaceConfig) {
+      lastLoadedSpecIdRef.current = specId;
+      setBaseUrl(workspaceConfig.baseUrl !== undefined && workspaceConfig.baseUrl !== null ? workspaceConfig.baseUrl : (endpoints[0]?.baseUrl || DEFAULT_BASE_URL));
+      setAuthToken(workspaceConfig.authToken !== undefined && workspaceConfig.authToken !== null ? workspaceConfig.authToken : '');
+      setCustomHeaders(workspaceConfig.customHeaders !== undefined && workspaceConfig.customHeaders !== null ? workspaceConfig.customHeaders : '');
+      setPreMethod(workspaceConfig.preMethod || 'POST');
+      setPreEndpoint(workspaceConfig.preEndpoint !== undefined && workspaceConfig.preEndpoint !== null ? workspaceConfig.preEndpoint : '');
+      setPrePayload(workspaceConfig.prePayload !== undefined && workspaceConfig.prePayload !== null ? workspaceConfig.prePayload : '{\n  "username": "admin",\n  "password": "password"\n}');
+      setPreExtractKey(workspaceConfig.preExtractKey !== undefined && workspaceConfig.preExtractKey !== null ? workspaceConfig.preExtractKey : 'access_token');
+      setRunPreEverytime(workspaceConfig.runPreEverytime ?? false);
+      setShowSettings(workspaceConfig.showSettings ?? false);
+    } else if (lastLoadedSpecIdRef.current !== specId && !workspaceConfig) {
+      lastLoadedSpecIdRef.current = specId;
+      setBaseUrl(endpoints[0]?.baseUrl || DEFAULT_BASE_URL);
+      setAuthToken('');
+      setCustomHeaders('');
+      setPreMethod('POST');
+      setPreEndpoint('');
+      setPrePayload('{\n  "username": "admin",\n  "password": "password"\n}');
+      setPreExtractKey('access_token');
+      setRunPreEverytime(false);
+      setShowSettings(false);
+    }
+  }, [specId, workspaceConfig, endpoints]);
 
+  // Sync changes back to PostgreSQL database with a 500ms debounce
   useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_showSettings${suffix}`, String(showSettings));
-  }, [showSettings, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_authToken${suffix}`, authToken);
-  }, [authToken, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_customHeaders${suffix}`, customHeaders);
-  }, [customHeaders, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_preMethod${suffix}`, preMethod);
-  }, [preMethod, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_preEndpoint${suffix}`, preEndpoint);
-  }, [preEndpoint, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_prePayload${suffix}`, prePayload);
-  }, [prePayload, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_preExtractKey${suffix}`, preExtractKey);
-  }, [preExtractKey, specId]);
-
-  useEffect(() => {
-    const suffix = specId ? `_${specId}` : '_default';
-    localStorage.setItem(`tester_runPreEverytime${suffix}`, String(runPreEverytime));
-  }, [runPreEverytime, specId]);
+    if (!specId) return;
+    const timer = setTimeout(() => {
+      onWorkspaceConfigChange?.({
+        baseUrl,
+        authToken,
+        customHeaders,
+        preMethod,
+        preEndpoint,
+        prePayload,
+        preExtractKey,
+        runPreEverytime,
+        showSettings,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [
+    specId,
+    baseUrl,
+    authToken,
+    customHeaders,
+    preMethod,
+    preEndpoint,
+    prePayload,
+    preExtractKey,
+    runPreEverytime,
+    showSettings,
+  ]);
 
   useEffect(() => {
     if (selectedEndpoint) {
@@ -239,11 +402,11 @@ export default function ApiTestingStudio({
   }, []);
 
   const loadScenarios = async (endpointId: string) => {
-    if (!selectedEndpoint) return;
+    if (!selectedEndpoint || !specId) return;
     setIsScenariosLoading(true);
     try {
       const [list, fetchedDatasets, fetchedMappings] = await Promise.all([
-        fetchCustomScenarios(endpointId).catch(() => []),
+        fetchCustomScenarios(endpointId, specId).catch(() => []),
         fetchDatasets().catch(() => []),
         fetchMappings().catch(() => []),
       ]);
@@ -264,14 +427,61 @@ export default function ApiTestingStudio({
       setGeneratedScenarios([]);
       setSelectedScenarios(new Set());
       setEditingScenario(null);
+      setCustomPayload('{\n  \n}');
       return;
     }
 
     setSelectedScenarios(new Set());
-    setGeneratedScenarios([]);
     setEditingScenario(null);
     loadScenarios(selectedEndpoint.id);
+
+    // Restore custom payload from cache or schema
+    const cachedPayload = customPayloadCache[selectedEndpoint.id];
+    if (cachedPayload !== undefined) {
+      setCustomPayload(cachedPayload);
+    } else {
+      setCustomPayload(
+        selectedEndpoint.requestSchema
+          ? generateExampleFromSchema(selectedEndpoint.requestSchema)
+          : '{\n  \n}'
+      );
+    }
+
+    // Restore generated scenarios from cache
+    const cachedGenScenarios = generatedScenariosCache[selectedEndpoint.id];
+    if (cachedGenScenarios !== undefined) {
+      setGeneratedScenarios(cachedGenScenarios);
+    } else {
+      setGeneratedScenarios([]);
+    }
   }, [selectedEndpoint]);
+
+  // Sync profile variables to path parameters and query parameters input form
+  useEffect(() => {
+    if (selectedEndpoint) {
+      const pParams = extractPathParams(selectedEndpoint);
+      setPathParams((prev) => {
+        const updated = { ...prev };
+        pParams.forEach((p) => {
+          if (!updated[p]) {
+            updated[p] = vars[p] || '';
+          }
+        });
+        return updated;
+      });
+
+      const qParams = extractQueryParams(selectedEndpoint);
+      setQueryParams((prev) => {
+        const updated = { ...prev };
+        qParams.forEach((q) => {
+          if (!updated[q]) {
+            updated[q] = vars[q] || '';
+          }
+        });
+        return updated;
+      });
+    }
+  }, [activeProfileName, selectedEndpoint?.id]);
 
   // Keep selected endpoint in sync if the endpoints list changes (e.g. after spec import)
   useEffect(() => {
@@ -296,15 +506,15 @@ export default function ApiTestingStudio({
     setIsExecuting(true);
     const newResults: ExecutionResult[] = [];
 
-    const headers = {
+    const headers = resolveHeaders({
       ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-      ...parseHeaders(customHeaders),
-    };
+      ...parseHeaders(substitute(customHeaders)),
+    });
     const prerequisites = (preEndpoint && runPreEverytime) ? [
       {
         method: preMethod,
-        endpoint: preEndpoint,
-        payload: parsePayload(prePayload),
+        endpoint: substitute(preEndpoint),
+        payload: parsePayload(substitute(prePayload)),
         extractVariableKey: preExtractKey || undefined,
       }
     ] : undefined;
@@ -312,14 +522,22 @@ export default function ApiTestingStudio({
     for (const scenario of allList) {
       try {
         const result = await executeTest({
-          baseUrl,
-          endpoint: selectedEndpoint.path,
+          workspaceId: specId || '',
+          baseUrl: substitute(baseUrl),
+          endpoint: resolveEndpointPath(
+            selectedEndpoint.path,
+            { ...pathParams, ...(scenario.pathParams || {}) },
+            { ...queryParams, ...(scenario.queryParams || {}) },
+            vars
+          ),
           method: selectedEndpoint.method,
-          payload: scenario.payload ?? {},
+          payload: resolvePayload(scenario.payload ?? {}),
           scenarioName: scenario.scenarioName,
           generationRule: scenario.generationRule,
+          expectedResult: scenario.expectedResult,
           headers,
           prerequisites,
+          geminiApiKey: geminiApiKey || undefined,
         });
         newResults.push(result);
       } catch {
@@ -327,7 +545,12 @@ export default function ApiTestingStudio({
       }
     }
 
-    setExecutionResults((prev) => [...newResults, ...prev]);
+    if (selectedEndpoint) {
+      setExecutionResultsCache((cache) => ({
+        ...cache,
+        [selectedEndpoint.id]: [...newResults, ...(cache[selectedEndpoint.id] || [])]
+      }));
+    }
     setIsExecuting(false);
     toast.success(`Executed ${newResults.length} scenario${newResults.length !== 1 ? 's' : ''}`);
     if (selectedEndpoint) {
@@ -357,15 +580,15 @@ export default function ApiTestingStudio({
       }
     });
 
-    const headers = {
+    const headers = resolveHeaders({
       ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-      ...parseHeaders(customHeaders),
-    };
+      ...parseHeaders(substitute(customHeaders)),
+    });
     const prerequisites = (preEndpoint && runPreEverytime) ? [
       {
         method: preMethod,
-        endpoint: preEndpoint,
-        payload: parsePayload(prePayload),
+        endpoint: substitute(preEndpoint),
+        payload: parsePayload(substitute(prePayload)),
         extractVariableKey: preExtractKey || undefined,
       }
     ] : undefined;
@@ -373,14 +596,22 @@ export default function ApiTestingStudio({
     for (const scenario of selectedList) {
       try {
         const result = await executeTest({
-          baseUrl,
-          endpoint: selectedEndpoint.path,
+          workspaceId: specId || '',
+          baseUrl: substitute(baseUrl),
+          endpoint: resolveEndpointPath(
+            selectedEndpoint.path,
+            { ...pathParams, ...(scenario.pathParams || {}) },
+            { ...queryParams, ...(scenario.queryParams || {}) },
+            vars
+          ),
           method: selectedEndpoint.method,
-          payload: scenario.payload ?? {},
+          payload: resolvePayload(scenario.payload ?? {}),
           scenarioName: scenario.scenarioName,
           generationRule: scenario.generationRule,
+          expectedResult: scenario.expectedResult,
           headers,
           prerequisites,
+          geminiApiKey: geminiApiKey || undefined,
         });
         newResults.push(result);
       } catch {
@@ -388,7 +619,12 @@ export default function ApiTestingStudio({
       }
     }
 
-    setExecutionResults((prev) => [...newResults, ...prev]);
+    if (selectedEndpoint) {
+      setExecutionResultsCache((cache) => ({
+        ...cache,
+        [selectedEndpoint.id]: [...newResults, ...(cache[selectedEndpoint.id] || [])]
+      }));
+    }
     setIsExecuting(false);
     toast.success(`Executed ${newResults.length} scenario${newResults.length !== 1 ? 's' : ''}`);
     if (selectedEndpoint) {
@@ -411,7 +647,7 @@ export default function ApiTestingStudio({
   return (
     <div className="flex h-[calc(100vh-8rem)]">
       {/* Column 1: API Explorer Sidebar */}
-      <div className="w-80 border-r border-border bg-card flex flex-col shrink-0">
+      <div style={{ width: sidebarWidth }} className="border-r border-border bg-card flex flex-col shrink-0">
         <div className="p-4 border-b border-border space-y-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -456,6 +692,25 @@ export default function ApiTestingStudio({
           </div>
         </ScrollArea>
       </div>
+      {/* Resizable drag handle */}
+      <div
+        className="w-1 cursor-col-resize hover:bg-indigo-500 bg-slate-200 transition-colors duration-150 shrink-0 select-none"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const startX = e.clientX;
+          const startWidth = sidebarWidth;
+          const handleMouseMove = (moveEvent: MouseEvent) => {
+            const newWidth = Math.max(220, Math.min(600, startWidth + (moveEvent.clientX - startX)));
+            setSidebarWidth(newWidth);
+          };
+          const handleMouseUp = () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+          };
+          window.addEventListener('mousemove', handleMouseMove);
+          window.addEventListener('mouseup', handleMouseUp);
+        }}
+      />
 
       {/* Column 2: Request Studio */}
       <div className="flex-1 flex flex-col bg-background">
@@ -465,9 +720,10 @@ export default function ApiTestingStudio({
               Target Base URL
             </label>
             <div className="flex gap-2">
-              <Input
+              <VariableInput
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
+                vars={vars}
                 className="font-mono text-sm flex-1"
                 data-testid="input-base-url"
               />
@@ -572,25 +828,43 @@ export default function ApiTestingStudio({
                             <label className="text-[10px] font-semibold text-muted-foreground block mb-1">
                               Bearer Token (Authorization Header)
                             </label>
-                            <Input
-                              type="password"
-                              placeholder="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                              value={authToken}
-                              onChange={(e) => setAuthToken(e.target.value)}
-                              className="text-xs h-9"
-                            />
+                            <div className="relative">
+                              <VariableInput
+                                type={showToken ? "text" : "password"}
+                                placeholder="Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                                value={authToken}
+                                onChange={(e) => setAuthToken(e.target.value)}
+                                vars={vars}
+                                className="text-xs h-9 pr-10"
+                              />
+                              {authToken && (
+                                <button
+                                  type="button"
+                                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-650 focus:outline-none cursor-pointer"
+                                  onClick={() => setShowToken(!showToken)}
+                                >
+                                  {showToken ? (
+                                    <EyeOff className="h-4 w-4" />
+                                  ) : (
+                                    <Eye className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <label className="text-[10px] font-semibold text-muted-foreground block mb-1">
                               Custom Headers (JSON or Key: Value lines)
                             </label>
-                            <Textarea
+                            <VariableTextarea
                               placeholder={`X-Tenant-Id: ALPHA\nContent-Type: application/json`}
                               value={customHeaders}
                               onChange={(e) => setCustomHeaders(e.target.value)}
+                              vars={vars}
                               className="text-xs min-h-[80px] font-mono"
                             />
                           </div>
+                          
                         </div>
                       </div>
 
@@ -608,7 +882,20 @@ export default function ApiTestingStudio({
                               <select
                                 className="w-full text-xs h-9 border border-input rounded-md px-2 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                                 value={preMethod}
-                                onChange={(e: any) => setPreMethod(e.target.value)}
+                                onChange={(e: any) => {
+                                  const nextMethod = e.target.value;
+                                  setPreMethod(nextMethod);
+                                  const matchingEp = endpoints.find(
+                                    ep => ep.path === preEndpoint && ep.method.toUpperCase() === nextMethod.toUpperCase()
+                                  );
+                                  if (matchingEp) {
+                                    if (matchingEp.requestSchema) {
+                                      setPrePayload(generateExampleFromSchema(matchingEp.requestSchema));
+                                    } else {
+                                      setPrePayload('{\n  \n}');
+                                    }
+                                  }
+                                }}
                               >
                                 <option value="POST">POST</option>
                                 <option value="GET">GET</option>
@@ -618,17 +905,27 @@ export default function ApiTestingStudio({
                               <label className="text-[10px] font-semibold text-muted-foreground block mb-1">
                                 Prerequisite Endpoint
                               </label>
-                              <Input
+                              <VariableInput
                                 placeholder="e.g. /auth/login"
                                 value={preEndpoint}
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   setPreEndpoint(val);
-                                  const matchingEp = endpoints.find(ep => ep.path === val);
+                                  const postEp = endpoints.find(
+                                    ep => ep.path === val && ep.method.toUpperCase() === 'POST'
+                                  );
+                                  const matchingEp = postEp || endpoints.find(ep => ep.path === val);
                                   if (matchingEp) {
-                                    setPreMethod(matchingEp.method as 'POST' | 'GET');
+                                    const nextMethod = matchingEp.method.toUpperCase() as 'POST' | 'GET';
+                                    setPreMethod(nextMethod);
+                                    if (matchingEp.requestSchema) {
+                                      setPrePayload(generateExampleFromSchema(matchingEp.requestSchema));
+                                    } else {
+                                      setPrePayload('{\n  \n}');
+                                    }
                                   }
                                 }}
+                                vars={vars}
                                 className="text-xs h-9"
                                 list="prereq-endpoints"
                               />
@@ -664,9 +961,10 @@ export default function ApiTestingStudio({
                                 <label className="text-[10px] font-semibold text-muted-foreground block mb-1">
                                   Prerequisite JSON Payload
                                 </label>
-                                <Textarea
+                                <VariableTextarea
                                   value={prePayload}
                                   onChange={(e) => setPrePayload(e.target.value)}
+                                  vars={vars}
                                   className="text-xs min-h-[80px] font-mono"
                                 />
                               </div>
@@ -691,12 +989,14 @@ export default function ApiTestingStudio({
                                     const loadingToast = toast.loading('Running prerequisite login to fetch token...');
                                     try {
                                       const result = await executeTest({
-                                        baseUrl,
-                                        endpoint: preEndpoint,
+                                        workspaceId: specId || '',
+                                        baseUrl: substitute(baseUrl),
+                                        endpoint: substitute(preEndpoint),
                                         method: preMethod,
-                                        payload: parsePayload(prePayload),
+                                        payload: parsePayload(substitute(prePayload)),
                                         scenarioName: 'Prerequisite Fetch',
                                         generationRule: 'manual',
+                                        geminiApiKey: geminiApiKey || undefined,
                                       });
                                       if (result.statusCode >= 200 && result.statusCode < 300) {
                                         const resBody = result.responseBody;
@@ -731,6 +1031,173 @@ export default function ApiTestingStudio({
                   )}
                 </Card>
 
+                {selectedEndpoint && (extractPathParams(selectedEndpoint).length > 0 || extractQueryParams(selectedEndpoint).length > 0) && (
+                  <Card className="p-4 bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200/80 dark:border-slate-800 rounded-xl space-y-3 shadow-xs">
+                    <div className="flex justify-between items-center flex-wrap gap-2 mb-1">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                        <Database className="h-4 w-4 text-indigo-500" /> URL Parameters (Path & Query)
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-indigo-650 hover:text-indigo-850 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:text-indigo-300 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center gap-1 font-semibold"
+                        onClick={() => setShowParams(prev => {
+                          localStorage.setItem('studio_show_params', String(!prev));
+                          return !prev;
+                        })}
+                      >
+                        {showParams ? '👁️ Hide Parameters' : '👁️ Show Parameters'}
+                      </Button>
+                    </div>
+
+                    {showParams && (
+                      <div className="space-y-4 pt-1">
+                        {/* Path Parameters Section */}
+                        {extractPathParams(selectedEndpoint).length > 0 && (
+                          <div className="space-y-3">
+                            <div className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider border-b border-blue-100 dark:border-blue-900 pb-1">
+                              Path Parameters
+                            </div>
+                            <div className="flex flex-col gap-3">
+                              {extractPathParams(selectedEndpoint).map((param) => {
+                                const matchingMapping = mappings.find(
+                                  m => m.endpointPath === selectedEndpoint.path && m.sourceField?.toLowerCase() === param.toLowerCase()
+                                ) || mappings.find(
+                                  m => m.sourceField?.toLowerCase() === param.toLowerCase()
+                                );
+                                
+                                let suggestedValues: string[] = [];
+                                if (matchingMapping) {
+                                  const parts = matchingMapping.targetMapping.split('.');
+                                  const dsName = parts[0];
+                                  const fName = parts[1];
+                                  const targetDs = datasets.find(d => d.datasetName.toLowerCase() === dsName.toLowerCase());
+                                  suggestedValues = targetDs?.records?.map(
+                                    (r: any) => String(r[fName] !== undefined ? r[fName] : (r.id || ''))
+                                  ).filter(Boolean) || [];
+                                }
+
+                                return (
+                                  <div key={`path-${param}`} className="space-y-1.5 p-3 bg-white dark:bg-slate-955 rounded-lg border border-slate-100 dark:border-slate-850 shadow-2xs">
+                                    {/* Line 1: Name & Input */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                      <div className="flex items-center gap-1.5 w-full sm:w-40 shrink-0">
+                                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">{param}</span>
+                                        <Badge variant="outline" className="text-[9px] font-bold bg-blue-50/65 text-blue-700 border-blue-100 px-1 py-0 h-4 uppercase shrink-0">Path</Badge>
+                                      </div>
+                                      <div className="flex-1">
+                                        <VariableInput
+                                          placeholder={`Path value...`}
+                                          value={pathParams[param] || ''}
+                                          onChange={(e) => setPathParams(prev => ({ ...prev, [param]: e.target.value }))}
+                                          vars={vars}
+                                          className="text-xs h-7.5 bg-slate-50/50"
+                                        />
+                                      </div>
+                                    </div>
+                                    {/* Line 2: Suggestions */}
+                                    {suggestedValues.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] sm:pl-42">
+                                        <span className="text-slate-400 font-medium shrink-0">Suggestions:</span>
+                                        <div className="flex flex-wrap gap-1">
+                                          {suggestedValues.slice(0, 5).map((val, idx) => (
+                                            <button
+                                              key={idx}
+                                              type="button"
+                                              className="text-[9px] font-semibold bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-850 rounded px-1.5 py-0.5 cursor-pointer transition-colors"
+                                              onClick={() => {
+                                                setPathParams(prev => ({ ...prev, [param]: val }));
+                                                toast.success(`Selected suggestion: "${val}"`);
+                                              }}
+                                            >
+                                              {val}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Query Parameters Section */}
+                        {extractQueryParams(selectedEndpoint).length > 0 && (
+                          <div className="space-y-3">
+                            <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider border-b border-emerald-100 dark:border-emerald-900 pb-1">
+                              Query Parameters
+                            </div>
+                            <div className="flex flex-col gap-3">
+                              {extractQueryParams(selectedEndpoint).map((param) => {
+                                const matchingMapping = mappings.find(
+                                  m => m.endpointPath === selectedEndpoint.path && m.sourceField?.toLowerCase() === param.toLowerCase()
+                                ) || mappings.find(
+                                  m => m.sourceField?.toLowerCase() === param.toLowerCase()
+                                );
+
+                                let suggestedValues: string[] = [];
+                                if (matchingMapping) {
+                                  const parts = matchingMapping.targetMapping.split('.');
+                                  const dsName = parts[0];
+                                  const fName = parts[1];
+                                  const targetDs = datasets.find(d => d.datasetName.toLowerCase() === dsName.toLowerCase());
+                                  suggestedValues = targetDs?.records?.map(
+                                    (r: any) => String(r[fName] !== undefined ? r[fName] : (r.id || ''))
+                                  ).filter(Boolean) || [];
+                                }
+
+                                return (
+                                  <div key={`query-${param}`} className="space-y-1.5 p-3 bg-white dark:bg-slate-955 rounded-lg border border-slate-100 dark:border-slate-850 shadow-2xs">
+                                    {/* Line 1: Name & Input */}
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                      <div className="flex items-center gap-1.5 w-full sm:w-40 shrink-0">
+                                        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 truncate">{param}</span>
+                                        <Badge variant="outline" className="text-[9px] font-bold bg-emerald-50/65 text-emerald-700 border-emerald-100 px-1 py-0 h-4 uppercase shrink-0">Query</Badge>
+                                      </div>
+                                      <div className="flex-1">
+                                        <VariableInput
+                                          placeholder={`Query value...`}
+                                          value={queryParams[param] || ''}
+                                          onChange={(e) => setQueryParams(prev => ({ ...prev, [param]: e.target.value }))}
+                                          vars={vars}
+                                          className="text-xs h-7.5 bg-slate-50/50"
+                                        />
+                                      </div>
+                                    </div>
+                                    {/* Line 2: Suggestions */}
+                                    {suggestedValues.length > 0 && (
+                                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] sm:pl-42">
+                                        <span className="text-slate-400 font-medium shrink-0">Suggestions:</span>
+                                        <div className="flex flex-wrap gap-1">
+                                          {suggestedValues.slice(0, 5).map((val, idx) => (
+                                            <button
+                                              key={idx}
+                                              type="button"
+                                              className="text-[9px] font-semibold bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/30 dark:hover:bg-indigo-900/50 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-850 rounded px-1.5 py-0.5 cursor-pointer transition-colors"
+                                              onClick={() => {
+                                                setQueryParams(prev => ({ ...prev, [param]: val }));
+                                                toast.success(`Selected suggestion: "${val}"`);
+                                              }}
+                                            >
+                                              {val}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Card>
+                )}
+
                 <Tabs defaultValue="scenarios">
                   <TabsList>
                     <TabsTrigger value="scenarios" data-testid="tab-scenarios">Scenario Suite</TabsTrigger>
@@ -742,39 +1209,78 @@ export default function ApiTestingStudio({
                     <span className="text-xs font-semibold text-muted-foreground">
                       Manage your test suite for this endpoint:
                     </span>
-                    <Button
-                      size="sm"
-                      disabled={isGenerating}
-                      className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-sm"
-                      onClick={async () => {
-                        if (!selectedEndpoint) return;
-                        setIsGenerating(true);
-                        const loadingToast = toast.loading('Generating AI test cases...');
-                        try {
-                          const res = await generateScenarios(
-                            selectedEndpoint.requestSchema ?? {},
-                            selectedEndpoint.summary
-                          );
-                          if (res && res.length > 0) {
-                            setGeneratedScenarios(res);
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        disabled={isGenerating}
+                        className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-sm font-semibold cursor-pointer"
+                        onClick={async () => {
+                          if (!selectedEndpoint) return;
+                          setIsGenerating(true);
+                          const loadingToast = toast.loading('Generating rule-based test cases...');
+                          try {
+                            const res = await generateScenarios(
+                              selectedEndpoint.requestSchema ?? {},
+                              selectedEndpoint.summary,
+                              selectedEndpoint.path,
+                              selectedEndpoint.method,
+                              false,
+                              geminiApiKey || undefined,
+                              selectedEndpoint.parameters
+                            );
+                            if (res && res.length > 0) {
+                              updateGeneratedScenarios(res);
+                              toast.dismiss(loadingToast);
+                              toast.success(`Generated ${res.length} test cases instantly!`);
+                            }
+                          } catch {
                             toast.dismiss(loadingToast);
-                            toast.success(`Generated ${res.length} test cases with ${aiModel}!`);
+                            toast.error('Failed to generate test cases.');
+                          } finally {
+                            setIsGenerating(false);
                           }
-                        } catch {
-                          toast.dismiss(loadingToast);
-                          toast.error('Failed to generate scenarios using local AI.');
-                        } finally {
-                          setIsGenerating(false);
-                        }
-                      }}
-                    >
-                      {isGenerating ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
+                        }}
+                      >
                         <Sparkles className="h-3.5 w-3.5" />
-                      )}
-                      {isGenerating ? 'Generating AI Scenarios...' : '✨ Generate AI Test Cases'}
-                    </Button>
+                        Generate Test Cases (Instant)
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={isGenerating}
+                        className="text-xs h-8 bg-white hover:bg-indigo-50 border-indigo-200 text-indigo-700 flex items-center gap-1.5 shadow-sm font-semibold cursor-pointer"
+                        onClick={async () => {
+                          if (!selectedEndpoint) return;
+                          setIsGenerating(true);
+                          const loadingToast = toast.loading(`Enriching with AI (${aiModel})...`);
+                          try {
+                            const res = await generateScenarios(
+                              selectedEndpoint.requestSchema ?? {},
+                              selectedEndpoint.summary,
+                              selectedEndpoint.path,
+                              selectedEndpoint.method,
+                              true,
+                              geminiApiKey || undefined,
+                              selectedEndpoint.parameters
+                            );
+                            if (res && res.length > 0) {
+                              updateGeneratedScenarios(res);
+                              toast.dismiss(loadingToast);
+                              toast.success(`Generated ${res.length} AI-enriched test cases successfully!`);
+                            }
+                          } catch {
+                            toast.dismiss(loadingToast);
+                            toast.error('Failed to generate AI-enriched test cases.');
+                          } finally {
+                            setIsGenerating(false);
+                          }
+                        }}
+                      >
+                        <Cpu className="h-3.5 w-3.5" />
+                        AI Deep Enrich (Slow)
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Custom Test Case Form */}
@@ -783,20 +1289,27 @@ export default function ApiTestingStudio({
                       <PlusCircle className="h-4 w-4 text-indigo-500" />
                       Add Custom Test Case
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Input
-                        placeholder="Scenario Name (e.g. Invalid UUID)"
-                        value={newScenarioName}
-                        onChange={(e) => setNewScenarioName(e.target.value)}
-                        className="text-xs h-9 bg-white"
-                      />
-                      <Input
-                        placeholder="Expected Result (e.g. 400 Bad Request)"
-                        value={newExpectedResult}
-                        onChange={(e) => setNewExpectedResult(e.target.value)}
-                        className="text-xs h-9 bg-white"
-                      />
-                    </div>
+                    <div className="grid grid-cols-2 gap-3 items-start">
+                       <Input
+                         placeholder="Scenario Name (e.g. Invalid UUID)"
+                         value={newScenarioName}
+                         onChange={(e) => setNewScenarioName(e.target.value)}
+                         className="text-xs h-9 bg-white"
+                       />
+                       <div className="space-y-1">
+                         <Input
+                           placeholder="Expected Result (e.g. 400 Bad Request)"
+                           value={newExpectedResult}
+                           onChange={(e) => setNewExpectedResult(e.target.value)}
+                           className="text-xs h-9 bg-white"
+                         />
+                         {HTTP_STATUS_DESCRIPTIONS[newExpectedResult.trim()] && (
+                            <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">
+                              Matched: {HTTP_STATUS_DESCRIPTIONS[newExpectedResult.trim()]}
+                            </span>
+                          )}
+                       </div>
+                     </div>
                     <div className="flex justify-end">
                       <Button
                         size="sm"
@@ -810,11 +1323,14 @@ export default function ApiTestingStudio({
                           try {
                             const basePayload = scenarios[0]?.payload || {};
                             await saveCustomScenario({
+                              workspaceId: specId || '',
                               endpointId: selectedEndpoint.id,
                               scenarioName: newScenarioName,
                               expectedResult: newExpectedResult || '200 OK',
                               payload: basePayload,
                               generationRule: 'manual',
+                              pathParams,
+                              queryParams,
                             });
                             setNewScenarioName('');
                             setNewExpectedResult('');
@@ -843,7 +1359,7 @@ export default function ApiTestingStudio({
                             size="sm"
                             variant="ghost"
                             className="text-xs h-7 text-muted-foreground hover:text-foreground"
-                            onClick={() => setGeneratedScenarios([])}
+                            onClick={() => updateGeneratedScenarios([])}
                           >
                             Discard All
                           </Button>
@@ -856,16 +1372,23 @@ export default function ApiTestingStudio({
                               try {
                                 for (const gs of generatedScenarios) {
                                   await saveCustomScenario({
+                                    workspaceId: specId || '',
                                     endpointId: selectedEndpoint.id,
                                     scenarioName: gs.scenarioName,
                                     expectedResult: gs.expectedResult,
                                     payload: gs.payload,
                                     generationRule: gs.generationRule,
+                                    priority: gs.priority,
+                                    category: gs.category,
+                                    description: gs.description,
+                                    assertions: gs.assertions,
+                                    pathParams: gs.pathParams,
+                                    queryParams: gs.queryParams,
                                   });
                                 }
                                 toast.dismiss(loadingToast);
                                 toast.success('Saved all generated scenarios to PostgreSQL!');
-                                setGeneratedScenarios([]);
+                                updateGeneratedScenarios([]);
                                 loadScenarios(selectedEndpoint.id);
                               } catch {
                                 toast.dismiss(loadingToast);
@@ -893,21 +1416,28 @@ export default function ApiTestingStudio({
                               setSelectedScenarios(newSelected);
                             }}
                             onLoadIntoEditor={() => {
-                              setCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
+                              updateCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
                               setEditingScenario(scenario);
                               toast.success(`Loaded "${scenario.scenarioName}" into JSON Editor for editing`);
                             }}
                             onSave={async () => {
                               try {
                                 await saveCustomScenario({
+                                  workspaceId: specId || '',
                                   endpointId: selectedEndpoint.id,
                                   scenarioName: scenario.scenarioName,
                                   expectedResult: scenario.expectedResult,
                                   payload: scenario.payload,
                                   generationRule: scenario.generationRule,
+                                  priority: scenario.priority,
+                                  category: scenario.category,
+                                  description: scenario.description,
+                                  assertions: scenario.assertions,
+                                  pathParams: scenario.pathParams,
+                                  queryParams: scenario.queryParams,
                                 });
                                 toast.success(`Saved "${scenario.scenarioName}" to database!`);
-                                setGeneratedScenarios((prev) => prev.filter((_, i) => i !== idx));
+                                updateGeneratedScenarios((prev) => prev.filter((_, i) => i !== idx));
                                 const newSelected = new Set(selectedScenarios);
                                 newSelected.delete(`gen-${idx}`);
                                 setSelectedScenarios(newSelected);
@@ -916,13 +1446,13 @@ export default function ApiTestingStudio({
                                 toast.error('Failed to save scenario.');
                               }
                             }}
-                            onUpdatePayload={async (updatedPayload) => {
-                              setGeneratedScenarios((prev) =>
-                                prev.map((s, i) => (i === idx ? { ...s, payload: updatedPayload } : s))
+                            onUpdatePayload={async (updatedPayload, updatedExpected) => {
+                              updateGeneratedScenarios((prev) =>
+                                prev.map((s, i) => (i === idx ? { ...s, payload: updatedPayload, expectedResult: updatedExpected } : s))
                               );
                               // If this scenario is currently being edited in the raw JSON editor, keep it in sync!
                               if (editingScenario?.scenarioName === scenario.scenarioName) {
-                                setCustomPayload(JSON.stringify(updatedPayload, null, 2));
+                                updateCustomPayload(JSON.stringify(updatedPayload, null, 2));
                               }
                             }}
                           />
@@ -958,7 +1488,7 @@ export default function ApiTestingStudio({
                             setSelectedScenarios(newSelected);
                           }}
                           onLoadIntoEditor={() => {
-                            setCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
+                            updateCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
                             setEditingScenario(scenario);
                             toast.success(`Loaded "${scenario.scenarioName}" into JSON Editor for editing`);
                           }}
@@ -973,17 +1503,20 @@ export default function ApiTestingStudio({
                               }
                             }
                           }}
-                          onUpdatePayload={async (updatedPayload) => {
+                          onUpdatePayload={async (updatedPayload, updatedExpected) => {
                             await saveCustomScenario({
+                              workspaceId: specId || '',
                               endpointId: selectedEndpoint.id,
                               scenarioName: scenario.scenarioName,
-                              expectedResult: scenario.expectedResult,
+                              expectedResult: updatedExpected,
                               payload: updatedPayload,
                               generationRule: scenario.generationRule,
+                              pathParams: scenario.pathParams,
+                              queryParams: scenario.queryParams,
                             });
                             // If this scenario is currently being edited in the raw JSON editor, keep it in sync!
                             if (editingScenario?.scenarioName === scenario.scenarioName) {
-                              setCustomPayload(JSON.stringify(updatedPayload, null, 2));
+                              updateCustomPayload(JSON.stringify(updatedPayload, null, 2));
                             }
                             loadScenarios(selectedEndpoint.id);
                           }}
@@ -1031,7 +1564,7 @@ export default function ApiTestingStudio({
                                       : (firstRecord?.id || 'TEST-VAL');
                                     
                                     current[field] = extractedValue;
-                                    setCustomPayload(JSON.stringify(current, null, 2));
+                                    updateCustomPayload(JSON.stringify(current, null, 2));
                                     toast.success(`Injected dynamic value: "${extractedValue}" into field "${field}"`);
                                   } catch {
                                     toast.error('Invalid JSON structure inside payload editor. Fix syntax errors first.');
@@ -1050,19 +1583,19 @@ export default function ApiTestingStudio({
                   <div className="grid grid-cols-5 gap-4 items-stretch">
                     <Card className="p-4 col-span-3 flex flex-col justify-between">
                       <div className="space-y-4">
-                        <div className="flex justify-between items-center mb-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                        <div className="flex justify-between items-center flex-wrap gap-2 mb-1">
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
+                            <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1 shrink-0">
                               <Terminal className="h-3.5 w-3.5" /> Raw JSON request body
                             </span>
                             {editingScenario && (
-                              <div className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 animate-pulse flex items-center gap-1">
+                              <div className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 animate-pulse flex items-center gap-1 shrink-0">
                                 <span>Editing: {editingScenario.scenarioName}</span>
                                 <button
-                                  className="text-amber-800 hover:text-amber-950 font-bold ml-1"
+                                  className="text-amber-800 hover:text-amber-950 font-bold ml-1 cursor-pointer"
                                   onClick={() => {
                                     setEditingScenario(null);
-                                    setCustomPayload('{\n  \n}');
+                                    updateCustomPayload('{\n  \n}');
                                   }}
                                 >
                                   ×
@@ -1070,7 +1603,7 @@ export default function ApiTestingStudio({
                               </div>
                             )}
                           </div>
-                          <div className="flex gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
                             {editingScenario && (
                               <Button
                                 size="sm"
@@ -1082,17 +1615,20 @@ export default function ApiTestingStudio({
                                     if (editingScenario.generationRule === 'manual') {
                                       // Update manually saved one in PostgreSQL
                                       await saveCustomScenario({
+                                        workspaceId: specId || '',
                                         endpointId: selectedEndpoint.id,
                                         scenarioName: editingScenario.scenarioName,
                                         expectedResult: editingScenario.expectedResult,
                                         payload: parsedPayload,
                                         generationRule: 'manual',
+                                        pathParams: editingScenario.pathParams || pathParams,
+                                        queryParams: editingScenario.queryParams || queryParams,
                                       });
                                       toast.success(`Updated saved scenario "${editingScenario.scenarioName}"`);
                                       loadScenarios(selectedEndpoint.id);
                                     } else {
                                       // It is an unsaved generated AI scenario, update it in memory!
-                                      setGeneratedScenarios((prev) =>
+                                      updateGeneratedScenarios((prev) =>
                                         prev.map((s) =>
                                           s.scenarioName === editingScenario.scenarioName
                                             ? { ...s, payload: parsedPayload }
@@ -1125,11 +1661,14 @@ export default function ApiTestingStudio({
                                 try {
                                   const parsedPayload = JSON.parse(customPayload);
                                   await saveCustomScenario({
+                                    workspaceId: specId || '',
                                     endpointId: selectedEndpoint.id,
                                     scenarioName: name,
                                     expectedResult: expected,
                                     payload: parsedPayload,
                                     generationRule: 'manual',
+                                    pathParams: editingScenario?.pathParams || pathParams,
+                                    queryParams: editingScenario?.queryParams || queryParams,
                                   });
                                   toast.success(`Saved custom scenario "${name}" to database`);
                                   setEditingScenario(null);
@@ -1149,19 +1688,24 @@ export default function ApiTestingStudio({
                                 if (!selectedEndpoint) return;
                                 const loadingToast = toast.loading('Generating AI payload...');
                                 try {
-                                  const list = await fetchCustomScenarios(selectedEndpoint.id).catch(() => []);
+                                  const list = await fetchCustomScenarios(selectedEndpoint.id, specId || '').catch(() => []);
                                   let aiScenario = list.find((s: any) => s.generationRule === 'ai_enriched');
                                   
                                   if (!aiScenario) {
                                     const genList = await generateScenarios(
                                       selectedEndpoint.requestSchema ?? {},
-                                      selectedEndpoint.summary
+                                      selectedEndpoint.summary,
+                                      selectedEndpoint.path,
+                                      selectedEndpoint.method,
+                                      true,
+                                      geminiApiKey || undefined,
+                                      selectedEndpoint.parameters
                                     );
                                     aiScenario = genList.find((s: any) => s.generationRule === 'ai_enriched') || genList[genList.length - 1];
                                   }
 
                                   if (aiScenario) {
-                                    setCustomPayload(JSON.stringify(aiScenario.payload || {}, null, 2));
+                                    updateCustomPayload(JSON.stringify(aiScenario.payload || {}, null, 2));
                                     toast.dismiss(loadingToast);
                                     toast.success(`Generated payload with ${aiModel}`);
                                   } else {
@@ -1178,9 +1722,10 @@ export default function ApiTestingStudio({
                             </Button>
                           </div>
                         </div>
-                        <Textarea
+                        <VariableTextarea
                           value={customPayload}
-                          onChange={(e) => setCustomPayload(e.target.value)}
+                          onChange={(e) => updateCustomPayload(e.target.value)}
+                          vars={vars}
                           className="font-mono text-xs min-h-[350px] resize-none border-slate-200"
                           data-testid="textarea-custom-payload"
                         />
@@ -1195,28 +1740,36 @@ export default function ApiTestingStudio({
                             setIsExecuting(true);
                             const loadingToast = toast.loading('Running custom test payload...');
                             try {
-                              const parsedPayload = JSON.parse(customPayload);
+                              const parsedPayload = JSON.parse(substitute(customPayload));
                               const result = await executeTest({
-                                baseUrl,
-                                endpoint: selectedEndpoint.path,
+                                workspaceId: specId || '',
+                                baseUrl: substitute(baseUrl),
+                                endpoint: resolveEndpointPath(selectedEndpoint.path, pathParams, queryParams, vars),
                                 method: selectedEndpoint.method,
                                 payload: parsedPayload,
                                 scenarioName: editingScenario ? `Edit: ${editingScenario.scenarioName}` : 'Custom Editor Run',
                                 generationRule: editingScenario ? editingScenario.generationRule : 'manual',
-                                headers: {
+                                expectedResult: editingScenario ? editingScenario.expectedResult : '200 OK',
+                                headers: resolveHeaders({
                                   ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
-                                  ...parseHeaders(customHeaders),
-                                },
+                                  ...parseHeaders(substitute(customHeaders)),
+                                }),
                                 prerequisites: (preEndpoint && runPreEverytime) ? [
                                   {
                                     method: preMethod,
-                                    endpoint: preEndpoint,
-                                    payload: parsePayload(prePayload),
+                                    endpoint: substitute(preEndpoint),
+                                    payload: parsePayload(substitute(prePayload)),
                                     extractVariableKey: preExtractKey || undefined,
                                   }
                                 ] : undefined,
+                                geminiApiKey: geminiApiKey || undefined,
                               });
-                              setExecutionResults((prev) => [result, ...prev]);
+                              if (selectedEndpoint) {
+                                setExecutionResultsCache((cache) => ({
+                                  ...cache,
+                                  [selectedEndpoint.id]: [result, ...(cache[selectedEndpoint.id] || [])]
+                                }));
+                              }
                               if (selectedEndpoint) {
                                 loadEndpointHistory(selectedEndpoint.path, selectedEndpoint.method);
                               }
@@ -1242,7 +1795,7 @@ export default function ApiTestingStudio({
 
                     <Card className="p-4 col-span-2 bg-slate-50 border-slate-200 flex flex-col h-full justify-between">
                       <div className="space-y-3 flex-1 flex flex-col">
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center flex-wrap gap-2">
                           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
                             Swagger Schema Example
                           </span>
@@ -1252,7 +1805,7 @@ export default function ApiTestingStudio({
                             className="h-7 text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200 font-semibold"
                             onClick={() => {
                               const exampleStr = generateExampleFromSchema(selectedEndpoint?.requestSchema);
-                              setCustomPayload(exampleStr);
+                              updateCustomPayload(exampleStr);
                               toast.success('Copied schema example to editor!');
                             }}
                           >
@@ -1283,7 +1836,7 @@ export default function ApiTestingStudio({
       </div>
 
       {/* Column 3: Execution Console */}
-      <div className="w-[420px] border-l border-border bg-card flex flex-col shrink-0">
+      <div className="w-[420px] border-l border-border bg-card flex flex-col shrink-0 overflow-hidden">
         <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">Execution Console</h3>
@@ -1298,7 +1851,7 @@ export default function ApiTestingStudio({
                       const conf = confirm('Are you sure you want to clear all database test logs for this endpoint?');
                       if (!conf) return;
                       try {
-                        await clearEndpointHistory(selectedEndpoint.path, selectedEndpoint.method);
+                        await clearEndpointHistory(selectedEndpoint.path, selectedEndpoint.method, specId || '');
                         toast.success('Database history cleared!');
                         loadEndpointHistory(selectedEndpoint.path, selectedEndpoint.method);
                       } catch {
@@ -1324,7 +1877,14 @@ export default function ApiTestingStudio({
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setExecutionResults([])}
+                   onClick={() => {
+                     if (selectedEndpoint) {
+                       setExecutionResultsCache((cache) => ({
+                         ...cache,
+                         [selectedEndpoint.id]: []
+                       }));
+                     }
+                   }}
                   data-testid="button-clear-console"
                   className="h-8 text-xs text-rose-600 hover:text-rose-700"
                 >
@@ -1419,6 +1979,7 @@ export default function ApiTestingStudio({
                         requestPayload: h.requestPayload || {},
                         responseBody: h.responseBody,
                         aiExplanation: h.aiExplanation,
+                        aiModel: h.aiModel,
                       };
                       return (
                         <div key={h.id || idx} className="relative group">

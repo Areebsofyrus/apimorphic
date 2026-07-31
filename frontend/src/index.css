@@ -102,7 +102,7 @@
 
   --sidebar-border: 30 8% 90%;
 
-  --sidebar-primary: 239 84% 67%;
+  --sidebar-primary: 216 70% 36%;
 
   --sidebar-primary-foreground: 0 0% 100%;
 
@@ -110,7 +110,7 @@
 
   --sidebar-accent-foreground: 220 13% 18%;
 
-  --sidebar-ring: 239 84% 67%;
+  --sidebar-ring: 216 70% 36%;
 
   --popover: 30 25% 99%;
 
@@ -118,8 +118,8 @@
 
   --popover-border: 30 8% 90%;
 
-  /* Indigo primary accent */
-  --primary: 239 84% 67%;
+  /* Robonito Royal Blue primary accent */
+  --primary: 216 70% 36%;
 
   --primary-foreground: 0 0% 100%;
 
@@ -134,7 +134,7 @@
   --muted-foreground: 220 9% 46%;
 
   /* Accent is same as primary */
-  --accent: 239 84% 67%;
+  --accent: 216 70% 36%;
 
   --accent-foreground: 0 0% 100%;
 
@@ -144,7 +144,7 @@
   --destructive-foreground: 0 0% 100%;
 
   --input: 30 8% 88%;
-  --ring: 239 84% 67%;
+  --ring: 216 70% 36%;
   
   /* Semantic chart colors */
   --chart-1: 160 60% 45%; /* emerald/green */
@@ -258,7 +258,7 @@
 
   --sidebar-border: 220 10% 22%;
 
-  --sidebar-primary: 239 84% 67%;
+  --sidebar-primary: 216 75% 50%;
 
   --sidebar-primary-foreground: 0 0% 100%;
 
@@ -266,7 +266,7 @@
 
   --sidebar-accent-foreground: 30 10% 92%;
 
-  --sidebar-ring: 239 84% 67%;
+  --sidebar-ring: 216 75% 50%;
 
   --popover: 220 15% 15%;
 
@@ -274,7 +274,7 @@
 
   --popover-border: 220 10% 22%;
 
-  --primary: 239 84% 67%;
+  --primary: 216 75% 50%;
 
   --primary-foreground: 0 0% 100%;
 
@@ -286,7 +286,7 @@
 
   --muted-foreground: 220 9% 62%;
 
-  --accent: 239 84% 67%;
+  --accent: 216 75% 50%;
 
   --accent-foreground: 0 0% 100%;
 
@@ -295,7 +295,7 @@
   --destructive-foreground: 0 0% 100%;
 
   --input: 220 10% 22%;
-  --ring: 239 84% 67%;
+  --ring: 216 75% 50%;
   --chart-1: 160 60% 45%;
   --chart-2: 221 83% 53%;
   --chart-3: 38 92% 50%;

@@ -36,6 +36,7 @@ export interface ExecutionResponse {
   requestPayload: Record<string, unknown>;
   responseBody: Record<string, unknown>;
   aiExplanation?: string;
+  aiModel?: string;
 }
 
 export const parseSwaggerApi = async (specStr: string) => {

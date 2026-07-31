@@ -1,22 +1,40 @@
 import { useState, useEffect } from 'react';
-import { fetchActiveModel, fetchSavedSpecs, syncWorkspaceSpec, linkWorkspaceUrl, deleteWorkspace } from '@/lib/api-client';
+import { fetchActiveModel, fetchSavedSpecs, syncWorkspaceSpec, linkWorkspaceUrl, deleteWorkspace, fetchMe, saveKeys, saveWorkspaceProfiles, saveWorkspaceConfig } from '@/lib/api-client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Zap, FileInput, Database, BarChart3, Loader2, RefreshCw, Layers, Link, Trash2 } from 'lucide-react';
+import { Zap, FileInput, Database, BarChart3, Loader2, RefreshCw, Layers, Link, Trash2, Eye, EyeOff, LogOut, Settings, MoreVertical, ChevronDown, User, LayoutDashboard } from 'lucide-react';
 import ApiTestingStudio from '@/pages/api-testing-studio';
 import SpecImport from '@/pages/spec-import';
 import DatasetsMappings from '@/pages/datasets-mappings';
 import AiDiagnostics from '@/pages/ai-diagnostics';
+import Login from '@/pages/login';
+import ProfilesSheet from '@/components/profiles-sheet';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from '@/components/ui/popover';
 import { Endpoint } from '@/types/api';
 import { toast } from 'sonner';
 
 const queryClient = new QueryClient();
 
 function App() {
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('tester_jwt_token'));
+  const [user, setUser] = useState<{ id: string; email: string; geminiApiKey?: string } | null>(null);
+  const [showProfilesModal, setShowProfilesModal] = useState(false);
+
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState<number>(0);
@@ -24,14 +42,68 @@ function App() {
   const [activeTab, setActiveTab] = useState('testing');
   const [aiModel, setAiModel] = useState('qwen2.5-coder:3b');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  
+  interface Profile {
+    name: string;
+    variables: Record<string, string>;
+  }
 
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [activeProfileName, setActiveProfileName] = useState<string>('');
+  const [globalVariables, setGlobalVariables] = useState<Record<string, string>>({});
+
+  const currentWorkspace = workspaces[activeWorkspaceIndex];
+
+  // Handle Token Changes
   useEffect(() => {
-    fetchActiveModel()
+    if (token) {
+      localStorage.setItem('tester_jwt_token', token);
+      fetchMe()
+        .then((profile) => {
+          setUser(profile);
+          setGeminiApiKey(profile.geminiApiKey || '');
+          loadWorkspaces();
+        })
+        .catch(() => {
+          handleLogout();
+        });
+    } else {
+      localStorage.removeItem('tester_jwt_token');
+      setUser(null);
+    }
+  }, [token]);
+
+  // Sync Profiles when workspace changes
+  useEffect(() => {
+    if (!currentWorkspace?.id) return;
+    
+    setGlobalVariables(currentWorkspace.globalVariables || {});
+
+    if (currentWorkspace.profiles && currentWorkspace.profiles.length > 0) {
+      setProfiles(currentWorkspace.profiles);
+      setActiveProfileName(currentWorkspace.activeProfileName || '');
+    } else {
+      const initial: Profile[] = [
+        { name: 'Super Admin', variables: { username: 'superadmin', password: 'password', tenantId: 'ALPHA' } },
+        { name: 'Tenant Admin', variables: { username: 'tenantadmin', password: 'password', tenantId: 'BETA' } },
+      ];
+      setProfiles(initial);
+      setActiveProfileName('');
+      saveWorkspaceProfiles(currentWorkspace.id, initial, '', {}).catch(() => {});
+    }
+  }, [currentWorkspace?.id]);
+
+  // Save Gemini Key to backend when edited
+  useEffect(() => {
+    if (!token) return;
+    fetchActiveModel(geminiApiKey.trim() || undefined)
       .then((data) => setAiModel(data.model))
       .catch(() => {});
 
-    loadWorkspaces();
-  }, []);
+    saveKeys(geminiApiKey).catch(() => {});
+  }, [geminiApiKey, token]);
 
   const loadWorkspaces = async () => {
     try {
@@ -39,7 +111,7 @@ function App() {
       setWorkspaces(specs || []);
       if (specs && specs.length > 0) {
         const savedId = localStorage.getItem('tester_selectedWorkspaceId');
-        const matchIdx = specs.findIndex((s) => s.id === savedId);
+        const matchIdx = specs.findIndex((s: any) => s.id === savedId);
         const idx = matchIdx >= 0 ? matchIdx : 0;
         setActiveWorkspaceIndex(idx);
         
@@ -79,7 +151,6 @@ function App() {
     }
   };
 
-  // Sync selected endpoint ID to localStorage whenever it changes
   useEffect(() => {
     const activeSpec = workspaces[activeWorkspaceIndex];
     if (activeSpec && selectedEndpointId) {
@@ -106,7 +177,23 @@ function App() {
     }
   };
 
-  const currentWorkspace = workspaces[activeWorkspaceIndex];
+  const handleLogout = () => {
+    localStorage.removeItem('tester_jwt_token');
+    setToken(null);
+    setUser(null);
+    setWorkspaces([]);
+    setEndpoints([]);
+    setSelectedEndpointId(null);
+  };
+
+  if (!token) {
+    return (
+      <TooltipProvider>
+        <Login onLoginSuccess={(t) => setToken(t)} />
+        <Toaster position="top-right" />
+      </TooltipProvider>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -114,132 +201,236 @@ function App() {
         <div className="min-h-screen w-full flex flex-col bg-background">
           {/* Global Header */}
           <header className="border-b border-border bg-card">
-            <div className="px-6 py-3.5 flex items-center justify-between gap-4 flex-wrap">
+            <div className="px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+              {/* Left Side: Brand & Workspace Selector */}
               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-8.5 h-8.5 rounded-lg bg-gradient-to-br from-indigo-500 via-violet-500 to-purple-500 flex items-center justify-center shadow-md">
-                    <Zap className="h-4.5 w-4.5 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-base font-bold text-foreground leading-tight" data-testid="text-app-title">
-                      AI API Tester Studio
-                    </h1>
-                    <span className="text-[10px] text-slate-400 font-medium">Automated Scenario Engine</span>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <RobonitoLogo className="h-6 w-auto text-indigo-650" />
+                  <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800 mx-1" />
+                  <Badge variant="outline" className="bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 border-indigo-250/60 font-semibold text-[10px] tracking-wider uppercase px-2 py-0.5">
+                    API Studio
+                  </Badge>
+                </div>
+
+                <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800" />
+
+                {/* Workspace Selector */}
+                <div className="flex items-center gap-1.5">
+                  {workspaces.length > 0 ? (
+                    <div className="flex items-center gap-1">
+                      <select
+                        className="text-xs font-bold bg-transparent hover:bg-slate-50 dark:hover:bg-slate-900 border-none rounded-md px-2 py-1.5 focus:outline-none cursor-pointer text-slate-700 dark:text-slate-200"
+                        value={activeWorkspaceIndex}
+                        onChange={(e) => handleWorkspaceChange(Number(e.target.value))}
+                      >
+                        {workspaces.map((w, idx) => (
+                          <option key={w.id} value={idx}>
+                            {w.title} ({w.endpoints?.length || 0} APIs)
+                          </option>
+                        ))}
+                      </select>
+
+                      {currentWorkspace && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600 rounded-md cursor-pointer">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" className="w-52 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 shadow-md">
+                            {currentWorkspace.swaggerUrl ? (
+                              <DropdownMenuItem
+                                disabled={isSyncing}
+                                onClick={handleSyncWorkspace}
+                                className="text-xs flex items-center gap-2 cursor-pointer"
+                              >
+                                <RefreshCw className={`h-3.5 w-3.5 text-indigo-500 ${isSyncing ? 'animate-spin' : ''}`} />
+                                <span>Sync Swagger URL</span>
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem
+                                onClick={async () => {
+                                  const url = prompt(
+                                    'Enter Swagger JSON URL to link this workspace (e.g. http://localhost:3000/api-json):'
+                                  );
+                                  if (!url) return;
+                                  const loadingToast = toast.loading('Linking Swagger URL...');
+                                  try {
+                                    await linkWorkspaceUrl(currentWorkspace.id, url);
+                                    toast.dismiss(loadingToast);
+                                    toast.success('Successfully linked Swagger URL!');
+                                    await loadWorkspaces();
+                                  } catch (err: any) {
+                                    toast.dismiss(loadingToast);
+                                    toast.error(err.message || 'Failed to link URL');
+                                  }
+                                }}
+                                className="text-xs flex items-center gap-2 cursor-pointer"
+                              >
+                                <Link className="h-3.5 w-3.5 text-slate-450" />
+                                <span>Link Swagger URL</span>
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onClick={async () => {
+                                  const conf = confirm(
+                                    `Are you sure you want to delete workspace "${currentWorkspace.title}"? All associated endpoints will be deleted permanently.`
+                                  );
+                                  if (!conf) return;
+                                  const loadingToast = toast.loading('Deleting workspace...');
+                                  try {
+                                    await deleteWorkspace(currentWorkspace.id);
+                                    toast.dismiss(loadingToast);
+                                    toast.success('Workspace deleted successfully!');
+                                    localStorage.removeItem('tester_selectedWorkspaceId');
+                                    await loadWorkspaces();
+                                  } catch (err: any) {
+                                    toast.dismiss(loadingToast);
+                                    toast.error(err.message || 'Failed to delete workspace');
+                                  }
+                              }}
+                              className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Delete Workspace</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-amber-600 font-bold px-2">No Workspace Imported</span>
+                  )}
                 </div>
               </div>
 
-              {/* Workspace Selector & Syncer */}
-              <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-xl border border-slate-200 shadow-xs">
-                <span className="text-[10px] text-slate-500 font-bold px-1.5 uppercase tracking-wider flex items-center gap-1">
-                  <Layers className="h-3 w-3 text-slate-400" />
-                  Workspace:
-                </span>
-                {workspaces.length > 0 ? (
-                  <div className="flex items-center gap-1.5">
+              {/* Right Side: Profile Switcher & Popover Settings */}
+              <div className="flex items-center gap-4">
+                {/* Profile Selector */}
+                {currentWorkspace && (
+                  <div className="flex items-center gap-1 animate-in fade-in duration-200">
+                    <Database className="h-3.5 w-3.5 text-slate-400" />
                     <select
-                      className="text-xs font-semibold bg-white border border-slate-200 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                      value={activeWorkspaceIndex}
-                      onChange={(e) => handleWorkspaceChange(Number(e.target.value))}
-                    >
-                      {workspaces.map((w, idx) => (
-                        <option key={w.id} value={idx}>
-                          {w.title} ({w.endpoints?.length || 0} APIs)
-                        </option>
-                      ))}
-                    </select>
-                    {currentWorkspace && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 w-8 p-0 text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer rounded-md"
-                        onClick={async () => {
-                          const conf = confirm(
-                            `Are you sure you want to delete workspace "${currentWorkspace.title}"? All associated endpoints will be deleted permanently.`
-                          );
-                          if (!conf) return;
-                          const loadingToast = toast.loading('Deleting workspace...');
+                      className="text-xs font-semibold bg-transparent border-none focus:outline-none cursor-pointer text-slate-650 dark:text-slate-350 pr-1 hover:text-slate-800"
+                      value={activeProfileName}
+                      onChange={async (e) => {
+                        const name = e.target.value;
+                        setActiveProfileName(name);
+                        if (currentWorkspace?.id) {
                           try {
-                            await deleteWorkspace(currentWorkspace.id);
-                            toast.dismiss(loadingToast);
-                            toast.success('Workspace deleted successfully!');
-                            localStorage.removeItem('tester_selectedWorkspaceId');
-                            await loadWorkspaces();
-                          } catch (err: any) {
-                            toast.dismiss(loadingToast);
-                            toast.error(err.message || 'Failed to delete workspace');
+                            await saveWorkspaceProfiles(currentWorkspace.id, profiles, name, globalVariables);
+                            setWorkspaces(prev => prev.map(w => w.id === currentWorkspace.id ? { ...w, activeProfileName: name } : w));
+                          } catch {
+                            toast.error('Failed to sync active profile to database');
                           }
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-xs text-amber-600 font-bold px-2">No Workspace Imported</span>
-                )}
-
-                {currentWorkspace?.swaggerUrl ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={isSyncing}
-                    className="h-8 text-xs font-semibold bg-white hover:bg-slate-100 border-slate-200 shadow-sm flex items-center gap-1.5"
-                    onClick={handleSyncWorkspace}
-                  >
-                    {isSyncing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
-                    ) : (
-                      <RefreshCw className="h-3.5 w-3.5 text-indigo-500" />
-                    )}
-                    Sync Swagger URL
-                  </Button>
-                ) : (
-                  currentWorkspace && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-[11px] font-semibold text-slate-500 hover:text-indigo-600 flex items-center gap-1"
-                      onClick={async () => {
-                        const url = prompt(
-                          'Enter Swagger JSON URL to link this workspace (e.g. http://localhost:3000/api-json):'
-                        );
-                        if (!url) return;
-                        const loadingToast = toast.loading('Linking Swagger URL...');
-                        try {
-                          await linkWorkspaceUrl(currentWorkspace.id, url);
-                          toast.dismiss(loadingToast);
-                          toast.success('Successfully linked Swagger URL!');
-                          await loadWorkspaces();
-                        } catch (err: any) {
-                          toast.dismiss(loadingToast);
-                          toast.error(err.message || 'Failed to link URL');
                         }
                       }}
                     >
-                      <Link className="h-3.5 w-3.5 text-slate-400 mr-0.5" />
-                      Link Swagger URL
+                      <option value="">No Profile (Raw Values)</option>
+                      {profiles.map((p) => (
+                        <option key={p.name} value={p.name}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-slate-900 cursor-pointer rounded-md flex items-center justify-center shrink-0"
+                      onClick={() => setShowProfilesModal(true)}
+                    >
+                      <Settings className="h-3.5 w-3.5 text-slate-400 hover:text-slate-650" />
                     </Button>
-                  )
+                  </div>
                 )}
-              </div>
 
-              <div className="flex items-center gap-3">
-                <Badge
-                  variant="outline"
-                  className="bg-emerald-50 text-emerald-700 border-emerald-200 font-mono text-xs"
-                  data-testid="badge-nestjs-status"
-                >
-                  <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-2 animate-pulse" />
-                  NestJS :3010
-                </Badge>
-                <Badge
-                  variant="outline"
-                  className="bg-violet-50 text-violet-700 border-violet-200 font-mono text-xs"
-                  data-testid="badge-ai-model"
-                >
-                  {aiModel}
-                </Badge>
+                <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800" />
+
+                {/* System Settings Popover */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="h-9 px-3 flex items-center gap-1.5 border-slate-200 hover:bg-slate-50 dark:border-slate-850 cursor-pointer rounded-lg text-xs font-semibold"
+                    >
+                      <User className="h-4 w-4 text-indigo-500" />
+                      <span className="text-slate-650 max-w-[120px] truncate">{user?.email.split('@')[0]}</span>
+                      <ChevronDown className="h-3 w-3 text-slate-400" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-80 p-4 space-y-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-lg bg-white dark:bg-slate-950">
+                    <div className="space-y-1">
+                      <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                        Account Settings
+                      </h4>
+                      <p className="text-xs text-slate-700 dark:text-slate-350 truncate">
+                        Logged in as: <strong className="text-slate-900 dark:text-slate-100">{user?.email}</strong>
+                      </p>
+                    </div>
+
+                    <div className="border-t border-slate-100 dark:border-slate-900 pt-3 space-y-2.5">
+                      <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                        Gemini AI Settings
+                      </h4>
+                      <div className="relative flex items-center bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 h-9">
+                        <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mr-2 select-none">
+                          Key:
+                        </span>
+                        <input
+                          type={showGeminiKey ? "text" : "password"}
+                          placeholder="AIzaSy... (Cloud)"
+                          value={geminiApiKey}
+                          onChange={(e) => setGeminiApiKey(e.target.value)}
+                          className="w-full bg-transparent text-[11px] font-mono focus:outline-none pr-6 text-slate-700 dark:text-slate-200"
+                        />
+                        {geminiApiKey && (
+                          <button
+                            type="button"
+                            className="absolute right-2 text-slate-400 hover:text-slate-650 focus:outline-none cursor-pointer"
+                            onClick={() => setShowGeminiKey(!showGeminiKey)}
+                          >
+                            {showGeminiKey ? (
+                              <EyeOff className="h-3.5 w-3.5" />
+                            ) : (
+                              <Eye className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-100 dark:border-slate-900 pt-3 space-y-2">
+                      <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">
+                        Status & Models
+                      </h4>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <span className="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full mr-0.5 animate-pulse" />
+                          <span className="text-xs text-slate-650 dark:text-slate-350">NestJS :3010</span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className="bg-violet-50 text-violet-750 border-violet-200 dark:bg-violet-950/20 dark:text-violet-400 dark:border-violet-900 font-mono text-[10px] px-1.5 py-0.5"
+                        >
+                          {aiModel}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-100 dark:border-slate-900 pt-3 flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full h-8.5 text-xs text-rose-600 hover:text-rose-750 hover:bg-rose-50 border border-rose-250 cursor-pointer rounded-lg flex items-center justify-center gap-1.5 font-semibold"
+                        onClick={handleLogout}
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                        Log out of Account
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
           </header>
@@ -277,8 +468,8 @@ function App() {
                   className="data-[state=active]:text-indigo-600 data-[state=active]:border-indigo-600 border-b-2 border-transparent h-12 px-1 rounded-none shadow-none font-semibold text-slate-500 hover:text-slate-800 transition-all flex items-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
                   data-testid="tab-diagnostics"
                 >
-                  <BarChart3 className="h-3.5 w-3.5" />
-                  AI Diagnostics
+                  <LayoutDashboard className="h-3.5 w-3.5" />
+                  Dashboard
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -290,6 +481,42 @@ function App() {
                 specId={currentWorkspace?.id}
                 selectedEndpointId={selectedEndpointId}
                 onSelectedEndpointIdChange={setSelectedEndpointId}
+                geminiApiKey={geminiApiKey}
+                profiles={profiles}
+                activeProfileName={activeProfileName}
+                globalVariables={globalVariables}
+                onProfilesChange={async (updated) => {
+                  setProfiles(updated);
+                  if (currentWorkspace?.id) {
+                    try {
+                      await saveWorkspaceProfiles(currentWorkspace.id, updated, activeProfileName, globalVariables);
+                      setWorkspaces(prev => prev.map(w => w.id === currentWorkspace.id ? { ...w, profiles: updated } : w));
+                    } catch {
+                      toast.error('Failed to sync profiles to database');
+                    }
+                  }
+                }}
+                workspaceConfig={currentWorkspace ? {
+                  baseUrl: currentWorkspace.baseUrl,
+                  authToken: currentWorkspace.authToken,
+                  customHeaders: currentWorkspace.customHeaders,
+                  preMethod: currentWorkspace.preMethod,
+                  preEndpoint: currentWorkspace.preEndpoint,
+                  prePayload: currentWorkspace.prePayload,
+                  preExtractKey: currentWorkspace.preExtractKey,
+                  runPreEverytime: currentWorkspace.runPreEverytime,
+                  showSettings: currentWorkspace.showSettings,
+                } : undefined}
+                onWorkspaceConfigChange={async (updatedConfig) => {
+                  if (currentWorkspace?.id) {
+                    try {
+                      await saveWorkspaceConfig(currentWorkspace.id, updatedConfig);
+                      setWorkspaces(prev => prev.map(w => w.id === currentWorkspace.id ? { ...w, ...updatedConfig } : w));
+                    } catch {
+                      toast.error('Failed to sync environment config to database');
+                    }
+                  }
+                }}
               />
             </TabsContent>
 
@@ -302,10 +529,28 @@ function App() {
             </TabsContent>
 
             <TabsContent value="diagnostics" className="flex-1 m-0 p-0">
-              <AiDiagnostics />
+              <AiDiagnostics endpoints={endpoints} />
             </TabsContent>
           </Tabs>
         </div>
+        <ProfilesSheet
+          isOpen={showProfilesModal}
+          onClose={() => setShowProfilesModal(false)}
+          profiles={profiles}
+          globalVariables={globalVariables}
+          onSave={async (updatedProfiles, updatedGlobals) => {
+            setProfiles(updatedProfiles);
+            setGlobalVariables(updatedGlobals);
+            if (currentWorkspace?.id) {
+              try {
+                await saveWorkspaceProfiles(currentWorkspace.id, updatedProfiles, activeProfileName, updatedGlobals);
+                setWorkspaces(prev => prev.map(w => w.id === currentWorkspace.id ? { ...w, profiles: updatedProfiles, globalVariables: updatedGlobals } : w));
+              } catch {
+                toast.error('Failed to sync settings to database');
+              }
+            }
+          }}
+        />
         <Toaster position="top-right" />
       </TooltipProvider>
     </QueryClientProvider>
@@ -313,3 +558,33 @@ function App() {
 }
 
 export default App;
+
+function RobonitoLogo({ className }: { className?: string }) {
+  return (
+    <svg
+      width="3991"
+      height="894"
+      viewBox="0 0 3991 894"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+    >
+      <defs>
+        <linearGradient id="paint0_linear_47_943" x1="1054.53" y1="856.75" x2="1621.67" y2="376.896" gradientUnits="userSpaceOnUse">
+          <stop offset="0.04" stop-color="#1B4E9B"/>
+          <stop offset="1" stop-color="#0A9226"/>
+        </linearGradient>
+      </defs>
+      <path d="M1532.3 443.376C1535.46 423.461 1538.63 403.467 1541.87 383.552C1542.9 377.26 1543.69 370.887 1545.59 364.913C1551.22 347.308 1567.85 336.077 1584.55 337.909C1603.63 340.059 1618.92 355.513 1619 374.95C1619 386.899 1616.62 398.927 1614.64 410.876C1604.11 473.567 1593.19 536.257 1582.73 599.028C1580.44 612.808 1579.41 626.828 1578.06 640.768C1565.15 772.921 1454.46 880.538 1322.78 892.805C1166.4 907.383 1026.17 792.755 1011.06 628.899C1006.93 584.052 997.671 539.682 989.912 495.153C968.375 371.046 946.363 247.099 924.589 123.071C923.717 118.053 923.084 112.955 923.163 107.937C923.4 88.978 936.545 73.365 954.519 70.2583C972.493 67.0721 990.546 77.2683 996.168 95.5896C1000.05 108.255 1001.79 121.637 1004.16 134.782C1021.5 233.079 1038.77 331.457 1056.03 429.834C1056.9 434.693 1058.16 439.393 1060.14 448.155C1121.27 369.454 1197.84 325.721 1295.55 325.721C1392.7 325.721 1469.27 368.418 1528.34 445.208C1529.69 444.65 1531.03 444.093 1532.38 443.614L1532.3 443.376ZM1293.89 627.704C1324.84 627.704 1355.8 628.262 1386.77 627.465C1419.86 626.589 1445.91 600.302 1445.99 567.483C1445.99 530.999 1418.35 504.951 1387.48 504.872C1374.81 504.872 1362.21 504.633 1349.55 504.633C1300.85 504.633 1252.24 504.633 1203.54 504.633C1189.29 504.633 1176.06 507.659 1164.58 516.98C1143.68 533.947 1135.52 560.314 1143.76 585.406C1152.08 610.817 1173.22 626.908 1200.93 627.465C1231.89 628.103 1262.84 627.624 1293.81 627.624L1293.89 627.704Z" fill="url(#paint0_linear_47_943)"/>
+      <path d="M2270.58 694.776C2270.58 653.434 2268.68 612.012 2270.97 570.828C2276.67 469.344 2327.03 394.545 2412.62 343.166C2552.46 259.207 2739.4 318.392 2811.53 476.912C2826.98 510.766 2833.62 547.409 2833.94 584.609C2834.65 665.382 2834.18 746.234 2834.1 827.007C2834.1 832.663 2833.86 838.558 2832.67 844.055C2828.4 863.331 2813.2 875.042 2794.35 874.165C2776.53 873.369 2760.62 859.11 2758.08 840.868C2757.13 834.018 2757.45 826.928 2757.45 819.918C2757.45 740.977 2757.92 662.116 2757.13 583.255C2756.42 514.669 2726.02 459.864 2671.31 421.071C2548.97 334.324 2385.62 399.246 2351.1 542.072C2346.5 561.03 2345.71 581.184 2345.55 600.779C2344.92 677.091 2345.16 753.484 2345.39 829.876C2345.39 844.055 2342.15 856.083 2330.91 865.483C2330.91 865.483 2330.91 865.483 2330.91 865.483C2310.17 882.928 2278.41 873.607 2271.68 847.241C2269.23 837.523 2268.91 827.087 2268.83 816.971C2268.52 776.266 2268.68 735.561 2268.68 694.776C2269.31 694.776 2269.86 694.776 2270.5 694.776H2270.58Z" fill="currentColor"/>
+      <path d="M3172.04 383.951C3171.09 390.165 3169.66 395.023 3169.66 399.883C3170.3 470.539 3169.66 541.195 3172.36 611.692C3174.02 655.425 3187.4 697.085 3212.18 733.569C3223.1 749.66 3237.2 763.76 3251.14 777.461C3262.22 788.294 3276.87 793.392 3292.23 795.464C3301.65 796.738 3311.08 797.455 3320.5 798.73C3341.16 801.597 3354.23 816.015 3354.31 835.77C3354.39 856.322 3340.61 873.13 3319.47 873.528C3301.97 873.926 3283.91 871.935 3267.06 867.554C3228.02 857.517 3195.63 836.009 3169.35 805.022C3129.92 758.581 3109.49 703.698 3099.19 644.512C3096.34 628.262 3094.68 611.692 3094.6 595.204C3094.28 411.273 3094.36 227.344 3094.44 43.4136C3094.44 12.5064 3112.81 -4.14206 3140.6 0.63741C3156.75 3.42543 3166.57 13.303 3168.72 29.7125C3169.59 36.6428 3169.43 43.6526 3169.43 50.6625C3169.43 124.506 3169.43 198.348 3169.43 272.111C3169.43 276.572 3169.43 281.033 3169.43 285.494C3169.82 303.974 3170.69 305.249 3188.75 305.328C3226.68 305.568 3264.67 305.328 3302.6 305.408C3308.94 305.408 3315.27 305.249 3321.53 306.045C3340.53 308.515 3352.97 322.614 3354.07 342.449C3355.1 361.965 3343.85 376.702 3324.22 380.286C3315.59 381.88 3306.65 382.278 3297.77 382.357C3263.01 382.597 3228.18 382.357 3193.42 382.517C3186.61 382.517 3179.79 383.314 3171.96 383.792L3172.04 383.951Z" fill="currentColor"/>
+      <path d="M0.0779103 671.675C0.0779103 623.96 -0.159631 576.244 0.0779103 528.529C0.869712 407.052 99.2906 307.957 220.119 306.762C238.489 306.603 256.78 306.364 275.15 306.922C282.592 307.16 290.431 308.036 297.32 310.825C313.711 317.357 322.103 332.013 320.52 348.503C318.937 364.992 307.851 377.499 290.194 380.445C278.396 382.437 266.281 382.278 254.325 382.597C243.557 382.915 232.789 382.915 222.099 382.597C146.561 380.605 76.2492 448.474 76.8035 528.291C77.4369 624.996 76.9619 721.7 76.8035 818.484C76.8035 825.494 77.041 832.584 76.0908 839.434C73.2404 860.305 56.6917 874.881 37.451 874.165C17.1808 873.368 0.632172 857.118 0.315451 835.85C-0.317991 795.782 0.0779103 755.714 -0.00126988 715.566C-0.00126988 700.909 -0.00126988 686.332 -0.00126988 671.675H0.0779103Z" fill="currentColor"/>
+      <path d="M2923.66 591.698C2923.66 514.112 2923.66 436.525 2923.66 359.018C2923.66 352.645 2923.42 346.272 2924.21 339.98C2926.35 321.499 2940.43 307.24 2957.14 306.045C2976.3 304.612 2993.49 316.879 2997.84 335.917C2999.5 343.246 3000.06 351.052 3000.06 358.62C3000.21 512.519 3000.21 666.338 3000.06 820.237C3000.06 828.441 2999.58 836.885 2997.84 844.851C2994.12 862.376 2976.54 875.041 2958.57 874.244C2940.91 873.448 2925.79 858.473 2924.05 839.753C2923.5 833.46 2923.66 827.087 2923.66 820.714C2923.66 744.402 2923.66 668.09 2923.66 591.778V591.698Z" fill="currentColor"/>
+      <path d="M2922.71 215.156C2924.05 207.749 2924.05 199.782 2926.9 193.012C2937.82 166.804 2969.66 161.866 2989.06 182.895C3003.55 198.587 3003.47 230.132 2988.9 245.905C2978.04 257.694 2964.75 261.836 2949.39 257.375C2935.92 253.472 2924.92 238.097 2923.73 222.883C2923.58 220.334 2923.73 217.785 2923.73 215.315C2923.34 215.315 2923.02 215.236 2922.63 215.156H2922.71Z" fill="currentColor"/>
+      <path d="M1293.81 627.783C1262.84 627.783 1231.89 628.262 1200.93 627.624C1173.22 627.067 1152.08 610.976 1143.76 585.565C1135.6 560.473 1143.76 534.106 1164.58 517.139C1176.06 507.818 1189.29 504.792 1203.54 504.792C1252.24 504.792 1300.85 504.792 1349.55 504.792C1362.21 504.792 1374.81 505.031 1387.48 505.031C1418.35 505.031 1445.98 531.078 1445.98 567.642C1445.98 600.381 1419.86 626.747 1386.76 627.624C1355.8 628.421 1324.84 627.783 1293.89 627.783H1293.81ZM1222.86 602.373C1243.44 602.851 1259.91 587.795 1260.79 567.801C1261.66 547.807 1244.23 529.406 1224.2 529.168C1204.64 529.008 1188.03 545.497 1187.63 565.412C1187.22 585.963 1202.35 601.815 1222.94 602.373H1222.86ZM1361.82 602.373C1382.09 602.611 1398.32 587.158 1398.88 567.004C1399.51 546.453 1382.33 528.769 1361.98 529.007C1342.5 529.247 1325.79 546.294 1325.71 565.889C1325.71 585.963 1341.63 602.133 1361.74 602.373H1361.82Z" fill="currentColor" />
+      <path d="M665.43 307.002C511.029 305.09 380.699 435.967 380.381 590.106C380.064 740.977 501.052 875.759 665.43 874.325C822.049 872.97 944.778 753.245 946.916 591.141C944.699 432.463 822.207 308.993 665.43 307.081V307.002ZM665.193 799.526C641.597 799.526 618.952 795.544 597.81 788.215C528.924 765.115 476.507 707.601 461.699 632.802C461.304 631.05 461.066 629.217 460.75 627.466C460.512 626.112 460.275 624.837 460.036 623.483C458.374 612.967 457.503 602.214 457.424 591.301C457.424 591.142 457.424 590.982 457.424 590.902C457.424 590.823 457.424 590.743 457.424 590.664C457.424 590.265 457.424 589.867 457.424 589.469C457.424 586.282 457.503 583.096 457.661 579.909C457.661 579.909 457.661 579.75 457.661 579.671C457.819 576.405 457.057 573.059 458.374 569.793C458.374 569.236 458.533 568.678 458.533 568.12C458.77 565.571 459.087 563.022 459.482 560.473C459.641 559.119 459.878 557.844 460.116 556.49C460.354 554.977 460.671 553.383 460.908 551.87C461.304 549.719 461.779 547.568 462.174 545.418C462.254 545.019 462.413 544.541 462.492 544.143C483.474 451.103 566.218 381.641 665.034 381.641C779.767 381.641 872.803 475.239 872.803 590.664C872.803 706.087 779.767 799.686 665.034 799.686L665.193 799.526Z" fill="currentColor" />
+      <path d="M1919.25 307.081C1764.37 305.648 1635.63 433.1 1635.15 590.823C1634.68 749.74 1761.92 875.122 1918.69 874.326C2080.38 873.529 2200.81 747.271 2200.89 592.336C2202.55 444.97 2086.48 308.595 1919.25 307.081ZM2051.32 750.856C2024.87 773.16 1992.73 788.933 1957.49 795.782C1956.23 796.022 1955.04 796.261 1953.77 796.42C1952.03 796.739 1950.29 797.057 1948.55 797.297C1946.24 797.615 1944.03 797.934 1941.73 798.173C1940.7 798.252 1939.76 798.411 1938.81 798.491C1937.38 798.651 1935.88 798.73 1934.45 798.81C1929.07 799.208 1923.6 799.527 1918.06 799.527C1803.33 799.527 1710.3 705.928 1710.3 590.505C1710.3 475.08 1803.33 381.482 1918.06 381.482C2032.8 381.482 2125.83 475.08 2125.83 590.505C2125.83 617.508 2120.68 643.317 2111.42 667.055C2111.03 668.091 2110.63 669.047 2110.23 670.083C2109.84 671.038 2109.44 671.995 2109.05 672.95C2096.14 704.336 2075.79 730.622 2051.32 750.856Z" fill="currentColor" />
+      <path d="M3706.43 307.081C3542.92 307.798 3423.91 447.916 3425.02 593.69C3426.13 740.022 3545.22 873.289 3709.59 875.042C3865.18 870.581 3992.34 754.758 3991 589.627C3989.65 422.027 3856.55 306.443 3706.43 307.081ZM3708.56 799.606C3667.95 799.606 3630.1 787.816 3598.02 767.584C3597.71 767.424 3597.39 767.185 3597.15 767.026C3594.7 765.512 3592.33 763.919 3589.95 762.246C3589.48 761.928 3589 761.609 3588.53 761.29C3586.23 759.697 3584.02 758.024 3581.8 756.272C3581.48 756.033 3581.25 755.793 3580.93 755.634C3532.15 717.399 3500.72 657.735 3500.72 590.743C3500.72 475.318 3593.75 381.721 3708.49 381.721C3823.22 381.721 3916.25 475.318 3916.25 590.743C3916.25 706.167 3823.22 799.765 3708.49 799.765L3708.56 799.606Z" fill="currentColor" />
+    </svg>
+  );
+}

@@ -1,9 +1,13 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne } from 'typeorm';
+import { ApiSpecEntity } from './api-spec.entity';
 
 @Entity('execution_logs')
 export class ExecutionLogEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  @ManyToOne(() => ApiSpecEntity, { onDelete: 'CASCADE', nullable: true })
+  workspace?: ApiSpecEntity;
 
   @Column({ type: 'varchar', length: 255 })
   endpointPath!: string;
@@ -34,6 +38,9 @@ export class ExecutionLogEntity {
 
   @Column({ type: 'text', nullable: true })
   aiExplanation?: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  aiModel?: string;
 
   @CreateDateColumn()
   executedAt!: Date;

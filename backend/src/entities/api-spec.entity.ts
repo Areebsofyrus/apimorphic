@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import { UserEntity } from './user.entity';
 
 export interface EndpointSpec {
   id: string;
@@ -22,6 +23,18 @@ export class ApiSpecEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  @ManyToOne(() => UserEntity, (user) => user.workspaces, { onDelete: 'CASCADE', nullable: true })
+  user?: UserEntity;
+
+  @Column({ type: 'jsonb', default: [] })
+  profiles!: Array<{ name: string; variables: Record<string, string> }>;
+
+  @Column({ type: 'jsonb', default: {} })
+  globalVariables!: Record<string, string>;
+
+  @Column({ type: 'varchar', length: 255, default: '' })
+  activeProfileName!: string;
+
   @Column({ type: 'varchar', length: 255 })
   title!: string;
 
@@ -42,6 +55,30 @@ export class ApiSpecEntity {
 
   @Column({ type: 'varchar', length: 1000, nullable: true })
   swaggerUrl?: string;
+
+  @Column({ type: 'text', nullable: true })
+  authToken?: string;
+
+  @Column({ type: 'text', nullable: true })
+  customHeaders?: string;
+
+  @Column({ type: 'varchar', length: 10, default: 'POST' })
+  preMethod!: 'POST' | 'GET';
+
+  @Column({ type: 'text', nullable: true })
+  preEndpoint?: string;
+
+  @Column({ type: 'text', nullable: true })
+  prePayload?: string;
+
+  @Column({ type: 'text', nullable: true })
+  preExtractKey?: string;
+
+  @Column({ type: 'boolean', default: false })
+  runPreEverytime!: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  showSettings!: boolean;
 
   @CreateDateColumn()
   createdAt!: Date;

@@ -14,12 +14,14 @@ import { IntelligenceController } from './modules/intelligence/intelligence.cont
 import { ScenarioController } from './modules/scenario/scenario.controller';
 
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { UserEntity } from './entities/user.entity';
 import { ApiSpecEntity } from './entities/api-spec.entity';
 import { TestContextEntity } from './entities/test-context.entity';
 import { StoredDatasetEntity } from './entities/stored-dataset.entity';
 import { SmartMappingEntity } from './entities/smart-mapping.entity';
 import { ExecutionLogEntity } from './entities/execution-log.entity';
 import { SavedTestCaseEntity } from './entities/saved-test-case.entity';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -35,6 +37,7 @@ import { SavedTestCaseEntity } from './entities/saved-test-case.entity';
         password: process.env.DB_PASSWORD || 'postgres',
         database: process.env.DB_NAME || 'ai_api_tester',
         entities: [
+          UserEntity,
           ApiSpecEntity,
           TestContextEntity,
           StoredDatasetEntity,
@@ -46,6 +49,7 @@ import { SavedTestCaseEntity } from './entities/saved-test-case.entity';
       }),
     }),
     TypeOrmModule.forFeature([
+      UserEntity,
       ApiSpecEntity,
       TestContextEntity,
       StoredDatasetEntity,
@@ -53,6 +57,7 @@ import { SavedTestCaseEntity } from './entities/saved-test-case.entity';
       ExecutionLogEntity,
       SavedTestCaseEntity,
     ]),
+    AuthModule,
   ],
   controllers: [ParserController, RunnerController, DatasetController, IntelligenceController, ScenarioController],
   providers: [

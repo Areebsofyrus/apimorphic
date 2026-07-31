@@ -17,6 +17,10 @@ import {
   Terminal,
   ChevronRight,
   Database,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Maximize2,
 } from 'lucide-react';
 import {
   parseSwaggerApi,
@@ -25,6 +29,7 @@ import {
   executeTestApi,
   EndpointSpec,
   ExecutionResponse,
+  api,
 } from './api/client';
 
 const SAMPLE_PETSTORE_SPEC = JSON.stringify(
@@ -130,6 +135,10 @@ export default function App() {
   const [activeScenarioIdx, setActiveScenarioIdx] = useState<number>(0);
   const [payloadStr, setPayloadStr] = useState<string>('{}');
   const [executionHistory, setExecutionHistory] = useState<ExecutionResponse[]>([]);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(320);
+  const [expandedCardIdx, setExpandedCardIdx] = useState<number | null>(null);
+  const [fullscreenResponse, setFullscreenResponse] = useState<string | null>(null);
+  const [fullscreenTitle, setFullscreenTitle] = useState<string>('');
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
@@ -140,10 +149,18 @@ export default function App() {
   const [isGeneratingScenarios, setIsGeneratingScenarios] = useState<boolean>(false);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [backendConnected, setBackendConnected] = useState<boolean>(true);
+  const [aiModel, setAiModel] = useState<string>('Local AI');
 
   // Auto-parse default spec on mount
   useEffect(() => {
     handleParseSpec(SAMPLE_PETSTORE_SPEC);
+    api.get('/runner/model')
+      .then((res) => {
+        if (res.data && res.data.model) {
+          setAiModel(res.data.model);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleParseSpec = async (rawContent: string) => {
@@ -322,7 +339,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-300 text-[11px] font-medium">
             <Cpu className="h-3.5 w-3.5 text-purple-400" />
-            gemma-4-E2B GGUF
+            {aiModel}
           </div>
         </div>
       </header>
@@ -330,7 +347,7 @@ export default function App() {
       {/* Studio Workspace 3-Column Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Column 1: API Explorer Sidebar */}
-        <aside className="w-80 border-r border-slate-800/80 bg-slate-950/60 flex flex-col">
+        <aside style={{ width: sidebarWidth }} className="border-r border-slate-800/80 bg-slate-950/60 flex flex-col shrink-0">
           <div className="p-4 border-b border-slate-800/80 space-y-3">
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-500" />
@@ -404,6 +421,25 @@ export default function App() {
             )}
           </div>
         </aside>
+        {/* Resizable drag handle */}
+        <div
+          className="w-1 cursor-col-resize hover:bg-indigo-500 bg-slate-800 transition-colors duration-150 shrink-0 select-none"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = sidebarWidth;
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const newWidth = Math.max(220, Math.min(600, startWidth + (moveEvent.clientX - startX)));
+              setSidebarWidth(newWidth);
+            };
+            const handleMouseUp = () => {
+              window.removeEventListener('mousemove', handleMouseMove);
+              window.removeEventListener('mouseup', handleMouseUp);
+            };
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+          }}
+        />
 
         {/* Column 2: Request Studio & Scenario Engine */}
         <main className="flex-1 flex flex-col border-r border-slate-800/80 overflow-y-auto">
@@ -646,11 +682,78 @@ export default function App() {
 
                   {/* Local AI Failure Diagnostic Card */}
                   {res.aiExplanation && (
-                    <div className="bg-purple-950/40 border border-purple-500/40 p-3 rounded-xl space-y-1.5">
+                    <div className="bg-purple-950/40 border border-purple-500/40 p-3 rounded-xl space-y-1.5 mb-3">
                       <div className="flex items-center gap-1.5 text-purple-300 text-[11px] font-bold">
-                        <Cpu className="h-3.5 w-3.5 text-purple-400" /> Local AI Failure Analysis (gemma-4-E2B):
+                        <Cpu className="h-3.5 w-3.5 text-purple-400" /> Local AI Failure Analysis ({res.aiModel || 'Local AI'}):
                       </div>
                       <p className="text-xs text-purple-200 leading-relaxed">{res.aiExplanation}</p>
+                    </div>
+                  )}
+
+                  {/* Details Toggle Button */}
+                  <button
+                    onClick={() => setExpandedCardIdx(expandedCardIdx === idx ? null : idx)}
+                    className="w-full text-center py-1 mt-2 hover:bg-slate-900/60 border-t border-slate-800/80 text-[10px] text-slate-400 font-semibold flex items-center justify-center gap-1 transition-all rounded-b-xl cursor-pointer"
+                  >
+                    {expandedCardIdx === idx ? (
+                      <>
+                        <ChevronUp className="h-3.5 w-3.5 text-indigo-400" /> Hide Details
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-3.5 w-3.5 text-indigo-400" /> Show Details
+                      </>
+                    )}
+                  </button>
+
+                  {expandedCardIdx === idx && (
+                    <div className="space-y-3 pt-3 border-t border-slate-800/80 mt-2 text-left">
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] font-bold text-slate-400">Request Payload</span>
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(JSON.stringify(res.requestPayload || {}, null, 2));
+                              alert('Request payload copied!');
+                            }}
+                            className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <pre className="bg-slate-950 p-2.5 rounded-lg border border-slate-900/60 text-[10px] font-mono text-emerald-400 max-h-36 overflow-y-auto whitespace-pre-wrap break-all">
+                          {JSON.stringify(res.requestPayload || {}, null, 2)}
+                        </pre>
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] font-bold text-slate-400">Response Body</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(JSON.stringify(res.responseBody || {}, null, 2));
+                                alert('Response body copied!');
+                              }}
+                              className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
+                            >
+                              Copy
+                            </button>
+                            <button
+                              onClick={() => {
+                                setFullscreenTitle(res.scenarioName);
+                                setFullscreenResponse(JSON.stringify(res.responseBody || {}, null, 2));
+                              }}
+                              className="text-[9px] text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
+                            >
+                              Expand
+                            </button>
+                          </div>
+                        </div>
+                        <pre className="bg-slate-950 p-2.5 rounded-lg border border-slate-900/60 text-[10px] font-mono text-emerald-400 max-h-36 overflow-y-auto whitespace-pre-wrap break-all">
+                          {JSON.stringify(res.responseBody || {}, null, 2)}
+                        </pre>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -698,6 +801,38 @@ export default function App() {
               >
                 <Sparkles className="h-4 w-4" /> {isLoadingSpec ? 'Parsing Spec...' : 'Parse & Discover APIs'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Fullscreen Response Modal */}
+      {fullscreenResponse && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6">
+          <div className="glass-panel max-w-4xl w-full p-6 rounded-2xl border border-slate-800 space-y-4 shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white">
+                Response Body for: {fullscreenTitle}
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(fullscreenResponse);
+                    alert('Copied response JSON!');
+                  }}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-all cursor-pointer"
+                >
+                  Copy JSON
+                </button>
+                <button
+                  onClick={() => setFullscreenResponse(null)}
+                  className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold rounded-lg transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 bg-slate-900 border border-slate-800 rounded-xl p-4 overflow-auto font-mono text-xs text-emerald-400 whitespace-pre-wrap leading-relaxed">
+              {fullscreenResponse}
             </div>
           </div>
         </div>

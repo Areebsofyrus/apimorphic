@@ -1,11 +1,16 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, Unique } from 'typeorm';
+import { UserEntity } from './user.entity';
 
 @Entity('stored_datasets')
+@Unique(['user', 'datasetName'])
 export class StoredDatasetEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar', length: 100, unique: true })
+  @ManyToOne(() => UserEntity, (user) => user.datasets, { onDelete: 'CASCADE', nullable: true })
+  user?: UserEntity;
+
+  @Column({ type: 'varchar', length: 100 })
   datasetName!: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })

@@ -1,11 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import OpenAI from 'openai';
+import { StoredDatasetEntity } from '../../entities/stored-dataset.entity';
+import { SmartMappingEntity } from '../../entities/smart-mapping.entity';
 
 export interface GeneratedScenario {
   scenarioName: string;
   generationRule: string;
-  expectedResult: 'success' | 'client_error' | 'validation_error' | 'security_blocked';
+  expectedResult: string;
   payload: Record<string, unknown>;
+  priority?: string;
+  category?: string;
+  description?: string;
+  assertions?: string[];
+  pathParams?: Record<string, string>;
+  queryParams?: Record<string, string>;
 }
 
 @Injectable()
@@ -13,133 +23,494 @@ export class ScenarioService {
   private readonly logger = new Logger(ScenarioService.name);
   private openaiClient?: OpenAI;
 
-  constructor() {
-    const baseURL = process.env.LOCAL_AI_BASE_URL || 'http://localhost:11434/v1';
-    this.openaiClient = new OpenAI({
-      baseURL,
-      apiKey: 'local-ai-key', // Dummy key for local endpoints
-    });
-  }
+  constructor(
+    @InjectRepository(StoredDatasetEntity)
+    private readonly datasetRepository: Repository<StoredDatasetEntity>,
+    @InjectRepository(SmartMappingEntity)
+    private readonly mappingRepository: Repository<SmartMappingEntity>,
+  ) {}
 
-  private async getActiveModelName(): Promise<string> {
+  async getClientAndModel(geminiApiKey?: string): Promise<{ client: OpenAI; model: string }> {
+    const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
+    if (apiKey) {
+      try {
+        const client = new OpenAI({
+          apiKey,
+          baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        });
+        // Test key validity
+        await client.models.list();
+        return {
+          client,
+          model: 'gemini-2.5-flash',
+        };
+      } catch (err: any) {
+        this.logger.warn(`Gemini API key validation failed: ${err.message}. Falling back to local AI.`);
+      }
+    }
+
+    const baseURL = process.env.LOCAL_AI_BASE_URL || 'http://localhost:11434/v1';
+    const client = new OpenAI({
+      baseURL,
+      apiKey: 'local-ai-key',
+    });
+    
     const configuredModel = process.env.LOCAL_AI_MODEL || 'unsloth/gemma-4-E2B-it-GGUF';
     try {
-      if (this.openaiClient) {
-        const list = await this.openaiClient.models.list();
-        const availableModels = list.data.map((m) => m.id);
-
-        if (availableModels.includes(configuredModel)) {
-          return configuredModel;
-        }
-
-        const matched = availableModels.find(
-          (m) =>
-            m.toLowerCase().includes('gemma') ||
-            m.toLowerCase().includes(configuredModel.toLowerCase())
-        );
-        if (matched) return matched;
-
-        if (availableModels.length > 0) {
-          return availableModels[0];
-        }
+      const list = await client.models.list();
+      const availableModels = list.data.map((m) => m.id);
+      if (availableModels.includes(configuredModel)) {
+        return { client, model: configuredModel };
+      }
+      const matched = availableModels.find(
+        (m) =>
+          m.toLowerCase().includes('gemma') ||
+          m.toLowerCase().includes(configuredModel.toLowerCase())
+      );
+      if (matched) return { client, model: matched };
+      if (availableModels.length > 0) {
+        return { client, model: availableModels[0] };
       }
     } catch {
-      // Ignore models.list errors and use fallback configured model
+      // Fallback
     }
-    return configuredModel;
+    return { client, model: configuredModel };
   }
 
-  generateRuleBasedScenarios(schema: Record<string, unknown>): GeneratedScenario[] {
+  private async getActiveModelName(geminiApiKey?: string): Promise<string> {
+    const { model } = await this.getClientAndModel(geminiApiKey);
+    return model;
+  }
+
+  private getEndpointCategory(path: string, method: string): 'auth' | 'read' | 'write' | 'delete' | 'generic' {
+    const lowerPath = path.toLowerCase();
+    const lowerMethod = method.toLowerCase();
+
+    if (
+      lowerPath.includes('login') ||
+      lowerPath.includes('token') ||
+      lowerPath.includes('auth') ||
+      lowerPath.includes('signin') ||
+      lowerPath.includes('signup') ||
+      lowerPath.includes('password') ||
+      lowerPath.includes('credential') ||
+      lowerPath.includes('otp') ||
+      lowerPath.includes('forgot') ||
+      lowerPath.includes('reset') ||
+      lowerPath.includes('logout')
+    ) {
+      return 'auth';
+    }
+    if (lowerMethod === 'get') {
+      return 'read';
+    }
+    if (lowerMethod === 'post' || lowerMethod === 'put' || lowerMethod === 'patch') {
+      return 'write';
+    }
+    if (lowerMethod === 'delete') {
+      return 'delete';
+    }
+    return 'generic';
+  }
+
+  private async injectDatasetValues(
+    schema: Record<string, unknown>,
+    forceRandom = false
+  ): Promise<Record<string, unknown>> {
+    const payload: Record<string, unknown> = {};
+    const properties = (schema.properties as Record<string, any>) || {};
+
+    // 1. Fetch approved mapping rules and datasets
+    const approvedMappings: SmartMappingEntity[] = await this.mappingRepository.findBy({ userApproved: true }).catch(() => []);
+    const datasets: StoredDatasetEntity[] = await this.datasetRepository.find().catch(() => []);
+
+    for (const [key, prop] of Object.entries(properties)) {
+      let injectedValue: unknown = undefined;
+
+      if (!forceRandom) {
+        // Try mapped dataset first
+        const mapping = approvedMappings.find((m: SmartMappingEntity) => m.sourceField === key);
+        if (mapping) {
+          const dataset = datasets.find((d: StoredDatasetEntity) => d.datasetName === mapping.datasetName);
+          if (dataset && dataset.records && dataset.records.length > 0) {
+            const record = dataset.records[Math.floor(Math.random() * dataset.records.length)];
+            const val = this.getNestedValue(record, mapping.targetField);
+            if (val !== undefined) {
+              injectedValue = val;
+              this.logger.log(`[ScenarioService] Injected mapped dataset value for key "${key}": ${injectedValue}`);
+            }
+          }
+        }
+
+        // Fallback: Name-based fuzzy lookup if no mapping is found
+        if (injectedValue === undefined) {
+          const matchedDataset = datasets.find((d: StoredDatasetEntity) => {
+            const hasMatch = (d.detectedFields || []).some((f: string) => this.isFieldMatch(f, key));
+            return hasMatch && d.records && d.records.length > 0;
+          });
+
+          if (matchedDataset) {
+            const field = (matchedDataset.detectedFields || []).find((f: string) => this.isFieldMatch(f, key));
+            if (field) {
+              const record = matchedDataset.records[Math.floor(Math.random() * matchedDataset.records.length)];
+              const val = this.getNestedValue(record, field);
+              if (val !== undefined) {
+                injectedValue = val;
+                this.logger.log(`[ScenarioService] Injected fuzzy matched dataset value for key "${key}": ${injectedValue}`);
+              }
+            }
+          }
+        }
+      }
+
+      // If no dataset value was injected, fallback to standard mock generation logic
+      if (injectedValue !== undefined) {
+        payload[key] = injectedValue;
+      } else {
+        const useExample = prop.example !== undefined && !forceRandom;
+
+        if (prop.type === 'string') {
+          if (useExample) {
+            payload[key] = prop.example;
+          } else if (key.toLowerCase().includes('email') || key.toLowerCase().includes('mail')) {
+            payload[key] = `user_${Math.floor(Math.random() * 9000 + 1000)}@example.com`;
+          } else if (key.toLowerCase().includes('phone') || key.toLowerCase().includes('mobile')) {
+            payload[key] = `+1-555-${Math.floor(Math.random() * 9000000 + 1000000)}`;
+          } else if (key.toLowerCase().includes('id') || key.toLowerCase().includes('uuid')) {
+            payload[key] = `id_${Math.random().toString(36).substr(2, 9)}`;
+          } else {
+            payload[key] = `${key}_val_${Math.floor(Math.random() * 1000)}`;
+          }
+        } else if (prop.type === 'number' || prop.type === 'integer') {
+          if (useExample) {
+            payload[key] = prop.example;
+          } else {
+            payload[key] = Math.floor(Math.random() * 90 + 10);
+          }
+        } else if (prop.type === 'boolean') {
+          payload[key] = Math.random() > 0.5;
+        } else if (prop.type === 'array') {
+          payload[key] = [];
+        } else if (prop.type === 'object') {
+          payload[key] = {};
+        } else {
+          payload[key] = `${key}_val_${Math.floor(Math.random() * 1000)}`;
+        }
+      }
+    }
+
+    return payload;
+  }
+
+  async generateRuleBasedScenarios(
+    schema: Record<string, unknown>,
+    path: string,
+    method: string,
+  ): Promise<GeneratedScenario[]> {
     const scenarios: GeneratedScenario[] = [];
-    const basePayload = this.buildValidBasePayload(schema);
+    const properties = (schema.properties as Record<string, any>) || {};
+    const category = this.getEndpointCategory(path, method);
 
-    // 1. Valid Payload
+    // 1. Valid Payload (Standard) - uses dataset injection
+    const validPayload = await this.injectDatasetValues(schema, false);
     scenarios.push({
-      scenarioName: 'Valid Payload Test',
+      scenarioName: 'Valid Payload (Standard)',
       generationRule: 'valid',
-      expectedResult: 'success',
-      payload: basePayload,
+      expectedResult: category === 'write' ? '201 Created' : '200 OK',
+      payload: validPayload,
     });
 
-    // 2. Null Fields
-    const nullPayload: Record<string, unknown> = {};
-    Object.keys(basePayload).forEach((k) => {
-      nullPayload[k] = null;
-    });
-    scenarios.push({
-      scenarioName: 'Null Fields Payload',
-      generationRule: 'null',
-      expectedResult: 'validation_error',
-      payload: nullPayload,
-    });
-
-    // 3. Empty String Fields
-    const emptyPayload: Record<string, unknown> = {};
-    Object.keys(basePayload).forEach((k) => {
-      emptyPayload[k] = typeof basePayload[k] === 'string' ? '' : basePayload[k];
-    });
-    scenarios.push({
-      scenarioName: 'Empty Values Payload',
-      generationRule: 'empty',
-      expectedResult: 'validation_error',
-      payload: emptyPayload,
+    // 2. Valid Payload (Alternative Randomization) - pure randomized values
+    const validAltPayload = await this.injectDatasetValues(schema, true);
+    // Mutate slightly to guarantee difference
+    Object.keys(validAltPayload).forEach((k) => {
+      const val = validAltPayload[k];
+      if (typeof val === 'string' && !val.includes('@')) {
+        validAltPayload[k] = `${val}_alt`;
+      } else if (typeof val === 'number') {
+        validAltPayload[k] = val + 5;
+      }
     });
 
-    // 4. SQL Injection Attack Payload
-    const sqliPayload: Record<string, unknown> = {};
-    Object.keys(basePayload).forEach((k) => {
-      sqliPayload[k] = typeof basePayload[k] === 'string' ? "' OR '1'='1' --" : basePayload[k];
+    // Determine context-aware outcome for randomized happy payload
+    let altExpected = '200 OK';
+    if (category === 'auth') {
+      const lowerP = path.toLowerCase();
+      if (lowerP.includes('login') || lowerP.includes('token') || lowerP.includes('signin') || lowerP.includes('auth')) {
+        altExpected = '401 Unauthorized';
+      } else if (lowerP.includes('forgot') || lowerP.includes('reset') || lowerP.includes('password') || lowerP.includes('otp')) {
+        altExpected = '400 Bad Request';
+      } else {
+        altExpected = '401 Unauthorized';
+      }
+    } else if (category === 'read') {
+      altExpected = '404 Not Found';
+    } else if (category === 'write') {
+      altExpected = '201 Created';
+    }
+
+    scenarios.push({
+      scenarioName: 'Valid Payload (Alternative Randomization)',
+      generationRule: 'valid_alternative',
+      expectedResult: altExpected,
+      payload: validAltPayload,
+    });
+
+    // 3. Missing Properties (Optional fields omitted)
+    const keys = Object.keys(validPayload);
+    if (keys.length > 1) {
+      const omittedPayload = { ...validPayload };
+      const omitKey = keys[Math.floor(Math.random() * keys.length)];
+      delete omittedPayload[omitKey];
+      scenarios.push({
+        scenarioName: `Missing Field: Omit "${omitKey}"`,
+        generationRule: 'missing_field',
+        expectedResult: '400 Bad Request',
+        payload: omittedPayload,
+      });
+    }
+
+    // 4. Type Mismatch (Number fields sent as string)
+    const typeMismatchPayload = { ...validPayload };
+    let mutatedType = false;
+    Object.entries(properties).forEach(([key, prop]) => {
+      if ((prop.type === 'number' || prop.type === 'integer') && typeMismatchPayload[key] !== undefined) {
+        typeMismatchPayload[key] = `not_a_number_${typeMismatchPayload[key]}`;
+        mutatedType = true;
+      }
+    });
+    if (mutatedType) {
+      scenarios.push({
+        scenarioName: 'Type Mismatch (Numeric as String)',
+        generationRule: 'type_mismatch',
+        expectedResult: '400 Bad Request',
+        payload: typeMismatchPayload,
+      });
+    }
+
+    // 5. Boundary Case (Minimum/Zero Limits)
+    const boundaryPayload = { ...validPayload };
+    Object.entries(properties).forEach(([key, prop]) => {
+      if (prop.type === 'number' || prop.type === 'integer') {
+        boundaryPayload[key] = 0;
+      } else if (prop.type === 'string') {
+        boundaryPayload[key] = '';
+      } else if (prop.type === 'array') {
+        boundaryPayload[key] = [];
+      }
     });
     scenarios.push({
-      scenarioName: 'SQL Injection Test',
-      generationRule: 'sql_injection',
-      expectedResult: 'security_blocked',
+      scenarioName: 'Boundary Limits (Zero & Empty)',
+      generationRule: 'boundary',
+      expectedResult: '400 Bad Request',
+      payload: boundaryPayload,
+    });
+
+    // 6. SQL Injection Attack
+    const sqliPayload = { ...validPayload };
+    Object.keys(sqliPayload).forEach((k) => {
+      if (typeof sqliPayload[k] === 'string') {
+        sqliPayload[k] = "' OR '1'='1' --";
+      }
+    });
+    scenarios.push({
+      scenarioName: 'SQL Injection Vulnerability Test',
+      generationRule: 'security-sqli',
+      expectedResult: '400 Bad Request',
       payload: sqliPayload,
     });
 
-    // 5. XSS Script Injection Payload
-    const xssPayload: Record<string, unknown> = {};
-    Object.keys(basePayload).forEach((k) => {
-      xssPayload[k] = typeof basePayload[k] === 'string' ? '<script>alert("XSS")</script>' : basePayload[k];
+    // 7. XSS Script Injection
+    const xssPayload = { ...validPayload };
+    Object.keys(xssPayload).forEach((k) => {
+      if (typeof xssPayload[k] === 'string') {
+        xssPayload[k] = '<script>alert("XSS")</script>';
+      }
     });
     scenarios.push({
-      scenarioName: 'XSS Injection Test',
-      generationRule: 'xss',
-      expectedResult: 'security_blocked',
+      scenarioName: 'Cross-Site Scripting (XSS) Test',
+      generationRule: 'security-xss',
+      expectedResult: '400 Bad Request',
       payload: xssPayload,
+    });
+
+    // 8. Path Traversal Payload
+    const traversalPayload = { ...validPayload };
+    Object.keys(traversalPayload).forEach((k) => {
+      if (typeof traversalPayload[k] === 'string') {
+        traversalPayload[k] = '../../../../etc/passwd';
+      }
+    });
+    scenarios.push({
+      scenarioName: 'Path Traversal Vulnerability Test',
+      generationRule: 'ai-edge-case',
+      expectedResult: '400 Bad Request',
+      payload: traversalPayload,
+    });
+
+    // 9. Null Values Injection
+    const nullPayload = { ...validPayload };
+    Object.keys(nullPayload).forEach((k) => {
+      nullPayload[k] = null;
+    });
+    scenarios.push({
+      scenarioName: 'Null Values Inject (All Fields)',
+      generationRule: 'null-injection',
+      expectedResult: '400 Bad Request',
+      payload: nullPayload,
     });
 
     return scenarios;
   }
 
-  async enrichPayloadWithLocalAI(
+  async generateAICases(
     schema: Record<string, unknown>,
+    endpointPath: string,
+    method: string,
     endpointSummary?: string,
-  ): Promise<Record<string, unknown>> {
+    geminiApiKey?: string,
+    parameters?: Array<{
+      name: string;
+      in: 'query' | 'header' | 'path' | 'cookie' | 'body';
+      required?: boolean;
+      schema?: Record<string, unknown>;
+    }>,
+  ): Promise<GeneratedScenario[]> {
     try {
-      const model = await this.getActiveModelName();
-      const response = await this.openaiClient?.chat.completions.create({
+      const { client, model } = await this.getClientAndModel(geminiApiKey);
+
+      // Load approved mappings and datasets to inject mapped values
+      const approvedMappings = await this.mappingRepository.find({ where: { userApproved: true } });
+      const datasets = await this.datasetRepository.find();
+      const mappingInfo: Record<string, any> = {};
+      for (const key of Object.keys(schema.properties || {})) {
+        const mapping = approvedMappings.find((m) => m.sourceField === key);
+        if (mapping) {
+          const dataset = datasets.find((d) => d.datasetName === mapping.datasetName);
+          if (dataset && dataset.records && dataset.records.length > 0) {
+            const record = dataset.records[Math.floor(Math.random() * dataset.records.length)];
+            const val = this.getNestedValue(record, mapping.targetField);
+            if (val !== undefined) {
+              mappingInfo[key] = val;
+            }
+          }
+        }
+      }
+
+      const systemPrompt = `You are a Senior QA Architect and API Automation Engineer with over 15 years of experience.
+
+Your task is to generate a concise, high-value API test suite for ONE endpoint.
+
+Objective:
+Generate the minimum number of test cases that achieve maximum functional, validation, security, and business coverage.
+
+Rules:
+1. Do NOT generate duplicate scenarios.
+2. Prefer meaningful scenarios over exhaustive permutations.
+3. Use business reasoning whenever possible.
+4. Use mapped values whenever provided.
+5. Cover:
+  - Happy path
+  - Required field validation
+  - Boundary values
+  - Invalid data
+  - Authentication & Authorization
+  - Business rules
+  - Data mapping validation
+  - Response validation
+  - Security
+  - Concurrency (if applicable)
+
+For every test case, you MUST return a JSON object with these EXACT keys:
+- "Title": string (Brief scenario name)
+- "Priority": "Critical" | "High" | "Medium" | "Low"
+- "Category": string (e.g. "Functional", "Security", "Validation")
+- "Description": string (Explanation of the scenario and why it is tested)
+- "Request Payload": object (A complete, realistic request payload that matches the endpoint schema. Ensure all fields are realistic)
+- "Expected HTTP Status": number (e.g. 200, 201, 400, 401, 403, 404)
+- "Expected Result": string (Explanation of the expected outcome)
+- "Assertions": string[] (Array of assertions, e.g. ["status is 200", "body.id is present"])
+
+Only generate test cases that add unique coverage.
+Return ONLY valid JSON array of objects. Do NOT include markdown code block formatting (such as \`\`\`json) or conversational text. Return only the raw JSON array.`;
+
+      const userPrompt = `Generate an AI-enriched test suite for API endpoint '${method.toUpperCase()} ${endpointPath}' (${endpointSummary || ''}) matching schema: ${JSON.stringify(schema)}.
+${Object.keys(mappingInfo).length > 0 ? `Use these valid mapped database values in payload keys if they are defined: ${JSON.stringify(mappingInfo)}` : ''}
+
+Ensure output is a valid JSON array of objects following the system format instructions.`;
+
+      const response = await client.chat.completions.create({
         model,
         messages: [
-          {
-            role: 'system',
-            content: 'You are an AI API testing assistant. Output ONLY valid JSON payloads matching the provided schema. Do NOT copy the default example values if they are specified in the schema. Make all values realistic, randomized, and tailored to the endpoint name and description. Output ONLY the raw JSON block without markdown formatting or conversational text.',
-          },
-          {
-            role: 'user',
-            content: `Generate a realistic mock JSON request payload for API endpoint '${endpointSummary || ''}' matching schema: ${JSON.stringify(schema)}. Do NOT use the default examples, generate new random but valid data.`,
-          },
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
         ],
-        temperature: 0.85,
+        temperature: 0.7,
       });
 
-      const content = response?.choices[0]?.message?.content || '{}';
+      const content = response?.choices[0]?.message?.content || '[]';
       const cleanJsonStr = content.replace(/```json/g, '').replace(/```/g, '').trim();
-      return JSON.parse(cleanJsonStr);
+      
+      let jsonArrayStr = cleanJsonStr;
+      const startIdx = cleanJsonStr.indexOf('[');
+      const endIdx = cleanJsonStr.lastIndexOf(']');
+      if (startIdx !== -1 && endIdx !== -1) {
+        jsonArrayStr = cleanJsonStr.substring(startIdx, endIdx + 1);
+      }
+
+      const testCases = JSON.parse(jsonArrayStr);
+      if (Array.isArray(testCases)) {
+        return testCases.map((item: any) => ({
+          scenarioName: item.Title || 'AI Scenario',
+          generationRule: 'ai_enriched',
+          expectedResult: `${item['Expected HTTP Status'] || 200} ${item['Expected Result'] || 'OK'}`,
+          payload: item['Request Payload'] || {},
+          priority: item.Priority || 'Medium',
+          category: item.Category || 'Functional',
+          description: item.Description || '',
+          assertions: item.Assertions || [],
+        }));
+      }
+
+      return [];
     } catch (error: any) {
-      this.logger.warn(`Local AI generation fallback: ${error.message}`);
-      return this.buildValidBasePayload(schema, true);
+      this.logger.warn(`AI deeper scenario generation fallback: ${error.message}`);
+      const validPayload = await this.injectDatasetValues(schema, true);
+      return [
+        {
+          scenarioName: 'AI Deep Enriched Happy Path (Fallback)',
+          generationRule: 'ai_enriched',
+          expectedResult: method.toLowerCase() === 'post' ? '201 Created' : '200 OK',
+          payload: validPayload,
+          priority: 'Critical',
+          category: 'Functional',
+          description: 'Fallback scenario due to AI Deep generation issue.',
+          assertions: ['status is 2xx'],
+        },
+      ];
     }
+  }
+
+  async enrichPayloadWithLocalAI(
+    schema: Record<string, unknown>,
+    endpointPath: string,
+    method: string,
+    endpointSummary?: string,
+  ): Promise<{ expectedResult: string; payload: Record<string, unknown> }> {
+    try {
+      const cases = await this.generateAICases(schema, endpointPath, method, endpointSummary);
+      if (cases && cases.length > 0) {
+        return {
+          expectedResult: cases[0].expectedResult,
+          payload: cases[0].payload,
+        };
+      }
+    } catch {}
+    const validPayload = await this.injectDatasetValues(schema, true);
+    return {
+      expectedResult: '200 OK',
+      payload: validPayload,
+    };
   }
 
   private buildValidBasePayload(schema: Record<string, unknown>, forceRandom = false): Record<string, unknown> {
@@ -179,5 +550,47 @@ export class ScenarioService {
     });
 
     return payload;
+  }
+
+  private getNestedValue(obj: any, path: string): any {
+    if (!obj || !path) return undefined;
+    const parts = path.split('.');
+    let current = obj;
+    for (const part of parts) {
+      if (current === null || current === undefined || typeof current !== 'object') {
+        return undefined;
+      }
+      if(Array.isArray(current)){
+        current = current[0][part];
+      }else
+      current = current[part];
+    }
+    return current;
+  }
+
+  private isFieldMatch(fieldName: string, requestKey: string): boolean {
+    const fieldLower = fieldName.toLowerCase();
+    const keyLower = requestKey.toLowerCase();
+
+    if (fieldLower === keyLower) return true;
+
+    // Handle nested fields like "sites.id" matching "siteId" or "site_id"
+    if (fieldName.includes('.')) {
+      const parts = fieldLower.split('.');
+      const lastPart = parts[parts.length - 1]; // e.g. "id"
+      const parentPart = parts[parts.length - 2]; // e.g. "sites"
+      const parentSingular = parentPart.endsWith('s') ? parentPart.slice(0, -1) : parentPart; // e.g. "site"
+
+      if (
+        keyLower === `${parentSingular}${lastPart}` ||
+        keyLower === `${parentSingular}_${lastPart}` ||
+        keyLower === `${parentPart}${lastPart}` ||
+        keyLower === `${parentPart}_${lastPart}`
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 }

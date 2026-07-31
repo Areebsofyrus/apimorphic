@@ -1,13 +1,26 @@
 import { ScenarioService } from './scenario.service';
+import { Repository } from 'typeorm';
+import { StoredDatasetEntity } from '../../entities/stored-dataset.entity';
+import { SmartMappingEntity } from '../../entities/smart-mapping.entity';
 
 describe('ScenarioService', () => {
   let service: ScenarioService;
+  let mockDatasetRepository: jest.Mocked<Repository<StoredDatasetEntity>>;
+  let mockMappingRepository: jest.Mocked<Repository<SmartMappingEntity>>;
 
   beforeEach(() => {
-    service = new ScenarioService();
+    mockDatasetRepository = {
+      find: jest.fn().mockResolvedValue([]),
+    } as any;
+
+    mockMappingRepository = {
+      findBy: jest.fn().mockResolvedValue([]),
+    } as any;
+
+    service = new ScenarioService(mockDatasetRepository, mockMappingRepository);
   });
 
-  it('should generate deterministic rule-based scenarios (valid, null, empty, sqli, xss)', () => {
+  it('should generate deterministic rule-based scenarios', async () => {
     const sampleSchema = {
       type: 'object',
       properties: {
@@ -16,11 +29,14 @@ describe('ScenarioService', () => {
       },
     };
 
-    const scenarios = service.generateRuleBasedScenarios(sampleSchema);
-    expect(scenarios.length).toBe(5);
-    expect(scenarios[0].generationRule).toBe('valid');
-    expect(scenarios[3].generationRule).toBe('sql_injection');
-    expect(scenarios[4].generationRule).toBe('xss');
-    expect(scenarios[3].payload.username).toContain("' OR '1'='1'");
+    const scenarios = await service.generateRuleBasedScenarios(sampleSchema, '/login', 'POST');
+    expect(scenarios.length).toBeGreaterThan(5);
+    
+    const validScenario = scenarios.find((s) => s.generationRule === 'valid');
+    expect(validScenario).toBeDefined();
+
+    const sqliScenario = scenarios.find((s) => s.generationRule === 'security-sqli');
+    expect(sqliScenario).toBeDefined();
+    expect(sqliScenario?.payload.username).toContain("' OR '1'='1' --");
   });
 });

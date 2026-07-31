@@ -1,11 +1,13 @@
-import { Controller, Post, Body, Get, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Body, Get, BadRequestException, NotFoundException, UseGuards, Req, Param } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiSpecEntity, EndpointSpec } from '../../entities/api-spec.entity';
 import { ParserService } from './parser.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import axios from 'axios';
 
 @Controller('parser')
+@UseGuards(JwtAuthGuard)
 export class ParserController {
   constructor(
     private readonly parserService: ParserService,
@@ -14,18 +16,24 @@ export class ParserController {
   ) {}
 
   @Get('specs')
-  async getSpecs() {
-    return this.apiSpecRepository.find();
+  async getSpecs(@Req() req: any) {
+    return this.apiSpecRepository.find({
+      where: { user: { id: req.user.userId } },
+      order: { title: 'ASC' },
+    });
   }
 
   @Post('swagger')
-  async parseSwagger(@Body() body: { spec: string | Record<string, unknown> }) {
+  async parseSwagger(@Req() req: any, @Body() body: { spec: string | Record<string, unknown> }) {
     const result = await this.parserService.parseSwagger(body.spec);
 
-    let specEntity = await this.apiSpecRepository.findOneBy({ title: result.title });
+    let specEntity = await this.apiSpecRepository.findOne({
+      where: { title: result.title, user: { id: req.user.userId } },
+    });
     if (!specEntity) {
       specEntity = new ApiSpecEntity();
       specEntity.title = result.title;
+      specEntity.user = { id: req.user.userId } as any;
     }
     specEntity.version = result.version;
     specEntity.sourceType = result.sourceType;
@@ -34,17 +42,20 @@ export class ParserController {
     specEntity.rawSpec = typeof body.spec === 'object' ? body.spec : undefined;
 
     await this.apiSpecRepository.save(specEntity);
-    return result;
+    return specEntity;
   }
 
   @Post('postman')
-  async parsePostman(@Body() body: { collection: Record<string, unknown> }) {
+  async parsePostman(@Req() req: any, @Body() body: { collection: Record<string, unknown> }) {
     const result = await this.parserService.parsePostmanCollection(body.collection);
 
-    let specEntity = await this.apiSpecRepository.findOneBy({ title: result.title });
+    let specEntity = await this.apiSpecRepository.findOne({
+      where: { title: result.title, user: { id: req.user.userId } },
+    });
     if (!specEntity) {
       specEntity = new ApiSpecEntity();
       specEntity.title = result.title;
+      specEntity.user = { id: req.user.userId } as any;
     }
     specEntity.version = result.version;
     specEntity.sourceType = result.sourceType;
@@ -52,11 +63,11 @@ export class ParserController {
     specEntity.rawSpec = body.collection;
 
     await this.apiSpecRepository.save(specEntity);
-    return result;
+    return specEntity;
   }
 
   @Post('swagger-url')
-  async parseSwaggerUrl(@Body() body: { url: string }) {
+  async parseSwaggerUrl(@Req() req: any, @Body() body: { url: string }) {
     if (!body.url) {
       throw new BadRequestException('URL is required');
     }
@@ -65,10 +76,13 @@ export class ParserController {
       const specData = response.data;
       const result = await this.parserService.parseSwagger(specData);
 
-      let specEntity = await this.apiSpecRepository.findOneBy({ title: result.title });
+      let specEntity = await this.apiSpecRepository.findOne({
+        where: { title: result.title, user: { id: req.user.userId } },
+      });
       if (!specEntity) {
         specEntity = new ApiSpecEntity();
         specEntity.title = result.title;
+        specEntity.user = { id: req.user.userId } as any;
       }
       specEntity.version = result.version;
       specEntity.sourceType = result.sourceType;
@@ -85,14 +99,16 @@ export class ParserController {
   }
 
   @Post('sync')
-  async syncSwaggerSpec(@Body() body: { id: string }) {
+  async syncSwaggerSpec(@Req() req: any, @Body() body: { id: string }) {
     if (!body.id) {
       throw new BadRequestException('Workspace ID is required');
     }
 
-    const specEntity = await this.apiSpecRepository.findOneBy({ id: body.id });
+    const specEntity = await this.apiSpecRepository.findOne({
+      where: { id: body.id, user: { id: req.user.userId } },
+    });
     if (!specEntity) {
-      throw new NotFoundException('Workspace not found');
+      throw new NotFoundException('Workspace not found or unauthorized');
     }
 
     if (!specEntity.swaggerUrl) {
@@ -129,13 +145,15 @@ export class ParserController {
   }
 
   @Post('update-base-url')
-  async updateBaseUrl(@Body() body: { id: string; baseUrl: string }) {
+  async updateBaseUrl(@Req() req: any, @Body() body: { id: string; baseUrl: string }) {
     if (!body.id) {
       throw new BadRequestException('Workspace ID is required');
     }
-    const spec = await this.apiSpecRepository.findOneBy({ id: body.id });
+    const spec = await this.apiSpecRepository.findOne({
+      where: { id: body.id, user: { id: req.user.userId } },
+    });
     if (!spec) {
-      throw new NotFoundException('Workspace not found');
+      throw new NotFoundException('Workspace not found or unauthorized');
     }
     spec.baseUrl = body.baseUrl;
     await this.apiSpecRepository.save(spec);
@@ -143,13 +161,15 @@ export class ParserController {
   }
 
   @Post('link-url')
-  async linkUrl(@Body() body: { id: string; url: string }) {
+  async linkUrl(@Req() req: any, @Body() body: { id: string; url: string }) {
     if (!body.id || !body.url) {
       throw new BadRequestException('ID and URL are required');
     }
-    const spec = await this.apiSpecRepository.findOneBy({ id: body.id });
+    const spec = await this.apiSpecRepository.findOne({
+      where: { id: body.id, user: { id: req.user.userId } },
+    });
     if (!spec) {
-      throw new NotFoundException('Workspace not found');
+      throw new NotFoundException('Workspace not found or unauthorized');
     }
     
     // Validate the URL
@@ -167,12 +187,64 @@ export class ParserController {
   }
 
   @Post('delete-workspace')
-  async deleteWorkspace(@Body() body: { id: string }) {
+  async deleteWorkspace(@Req() req: any, @Body() body: { id: string }) {
     if (!body.id) {
       throw new BadRequestException('Workspace ID is required');
     }
-    const result = await this.apiSpecRepository.delete(body.id);
-    return { success: true, affected: result.affected };
+    const spec = await this.apiSpecRepository.findOne({
+      where: { id: body.id, user: { id: req.user.userId } },
+    });
+    if (!spec) {
+      throw new NotFoundException('Workspace not found or unauthorized');
+    }
+    await this.apiSpecRepository.remove(spec);
+    return { success: true };
+  }
+
+  @Post('workspace/:id/profiles')
+  async saveProfiles(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body: { profiles: any[]; activeProfileName: string; globalVariables?: Record<string, string> },
+  ) {
+    const spec = await this.apiSpecRepository.findOne({
+      where: { id, user: { id: req.user.userId } },
+    });
+    if (!spec) {
+      throw new NotFoundException('Workspace not found or unauthorized');
+    }
+    spec.profiles = body.profiles || [];
+    spec.activeProfileName = body.activeProfileName || '';
+    if (body.globalVariables !== undefined) {
+      spec.globalVariables = body.globalVariables;
+    }
+    await this.apiSpecRepository.save(spec);
+    return { success: true };
+  }
+
+  @Post('workspace/:id/env-config')
+  async saveEnvConfig(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body: any,
+  ) {
+    const spec = await this.apiSpecRepository.findOne({
+      where: { id, user: { id: req.user.userId } },
+    });
+    if (!spec) {
+      throw new NotFoundException('Workspace not found or unauthorized');
+    }
+    spec.baseUrl = body.baseUrl;
+    spec.authToken = body.authToken;
+    spec.customHeaders = body.customHeaders;
+    spec.preMethod = body.preMethod;
+    spec.preEndpoint = body.preEndpoint;
+    spec.prePayload = body.prePayload;
+    spec.preExtractKey = body.preExtractKey;
+    spec.runPreEverytime = body.runPreEverytime ?? false;
+    spec.showSettings = body.showSettings ?? false;
+    await this.apiSpecRepository.save(spec);
+    return { success: true };
   }
 
   @Post('detect-changes')
