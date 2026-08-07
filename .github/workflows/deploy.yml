@@ -1,0 +1,59 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22.17.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.17.0'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Backend Tests
+        run: npm run test:backend
+
+      - name: Build Backend
+        run: npm run build:backend
+
+      - name: Build Frontend
+        run: npm run build:frontend
+
+      - name: Deploy to Server
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || 22 }}
+        run: |
+          # Set up SSH key and agent
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+          # Deploy Frontend: Clean target directory and upload Vite static files
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p /var/www/apimorphic/frontend && rm -rf /var/www/apimorphic/frontend/*"
+          scp -P "$SSH_PORT" -r frontend/dist/* "$SSH_USER@$SSH_HOST:/var/www/apimorphic/frontend/"
+
+          # Deploy Backend: Upload NestJS build dist/ and packages, keeping .env
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p /var/www/apimorphic/backend"
+          scp -P "$SSH_PORT" -r backend/dist "$SSH_USER@$SSH_HOST:/var/www/apimorphic/backend/"
+          scp -P "$SSH_PORT" backend/package.json backend/package-lock.json "$SSH_USER@$SSH_HOST:/var/www/apimorphic/backend/"
+
+          # Server Commands: Install prod dependencies and reload/start NestJS app via PM2
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "cd /var/www/apimorphic/backend && npm install --omit=dev && (pm2 reload apimorphic-backend || pm2 start dist/main.js --name apimorphic-backend)"

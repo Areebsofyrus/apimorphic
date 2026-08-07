@@ -1,7 +1,7 @@
 {
   "name": "ai-api-tester-extension",
-  "displayName": "AI API Tester",
-  "description": "Automated API testing extension powered by NestJS and Local AI",
+  "displayName": "APIMorphic",
+  "description": "Automated API testing extension powered by NestJS and Local AI (APIMorphic by Robonito)",
   "version": "1.0.0",
   "engines": {
     "vscode": "^1.85.0"
@@ -16,20 +16,20 @@
     "commands": [
       {
         "command": "aiApiTester.openDashboard",
-        "title": "AI API Tester: Open Dashboard"
+        "title": "APIMorphic: Open Dashboard"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "ai-api-tester-sidebar",
-          "title": "AI API Tester",
+          "title": "APIMorphic",
           "icon": "$(beaker)"
         }
       ]
     },
     "configuration": {
-      "title": "AI API Tester Settings",
+      "title": "APIMorphic Settings",
       "properties": {
         "aiApiTester.backendUrl": {
           "type": "string",

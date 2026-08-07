@@ -1,4 +1,4 @@
-# Project Progress: AI API Tester
+# Project Progress: APIMorphic
 
 ## Overview
 Automated API testing VS Code Extension powered by NestJS backend, PostgreSQL database, and Local AI (OpenAI-compatible local server like Ollama / LM Studio).

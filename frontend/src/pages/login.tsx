@@ -3,9 +3,11 @@ import { login, register } from '../lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Mail, Lock, Loader2, ArrowRight } from 'lucide-react';
+import { Mail, Lock, Loader2, ArrowRight, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import RobonitoLogo from '@/components/robonito-logo';
+import APIMorphicLogo from '@/components/apimorphic-logo';
 
 interface LoginProps {
   onLoginSuccess: (token: string) => void;
@@ -56,17 +58,20 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         className="w-full max-w-md z-10"
       >
         <Card className="p-8 border border-slate-200/80 dark:border-slate-800 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md rounded-2xl shadow-xl space-y-6">
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center p-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-2xl mb-1 shadow-sm">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-6 w-6">
-                <path d="M12 2L2 22h20L12 2zm0 4l6.5 13H5.5L12 6z" fill="currentColor" />
-              </svg>
+          <div className="text-center space-y-3">
+            <div className="flex flex-col items-center select-none py-2 w-full">
+              <div className="flex flex-col items-center relative">
+                <APIMorphicLogo className="h-15 w-auto shrink-0 object-contain" />
+                <div className="flex items-center gap-1.5 self-end translate-x-6 mt-1 mr-4">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                    by
+                  </span>
+                  <RobonitoLogo className="h-5 w-auto text-indigo-650 dark:text-indigo-400" />
+                </div>
+              </div>
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-              AI API Tester Studio
-            </h1>
-            <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-              Auto-generate test suites & isolate mock datasets using Local AI Models.
+            <p className="text-xs text-muted-foreground max-w-xs mx-auto mt-2">
+              Auto-generate test suites & isolate mock datasets using AI Models.
             </p>
           </div>
 
@@ -133,8 +138,18 @@ export default function Login({ onLoginSuccess }: LoginProps) {
               className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 cursor-pointer transition-colors"
               onClick={() => setIsSignUp(!isSignUp)}
             >
-              {isSignUp ? 'Already have an account? Sign In' : 'New to AI Studio? Create Account'}
+              {isSignUp ? 'Already have an account? Sign In' : 'New to APIMorpic? Create Account'}
             </button>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-center animate-in fade-in duration-300">
+            <div className="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-medium">
+              <HelpCircle className="h-3 w-3 text-indigo-500" />
+              <span>Why <strong>APIMorphic</strong>?</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground/90 max-w-xs mx-auto mt-1 leading-relaxed">
+              Derived from <strong>API</strong> + <strong>Morphic</strong> (shaping/varying form). Represents our AI engine's ability to morph static API specifications into dynamic execution scenarios, realistic payloads, and boundary edge cases.
+            </p>
           </div>
         </Card>
       </motion.div>

@@ -1,4 +1,4 @@
-# 🚀 AI API Tester
+# 🚀 APIMorphic
 
 An automated API testing VS Code Extension (compatible with Antigravity IDE and standard web applications) powered by a **NestJS Backend**, **PostgreSQL Database**, and **Local AI Models** (such as `unsloth/gemma-4-E2B-it-GGUF` served via Ollama, LM Studio, or LocalAI).
 
