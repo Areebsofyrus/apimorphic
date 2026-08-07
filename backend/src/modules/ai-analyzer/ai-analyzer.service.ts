@@ -14,12 +14,11 @@ export class AiAnalyzerService {
     });
   }
 
-  async getClientAndModel(geminiApiKey?: string): Promise<{ client: OpenAI; model: string }> {
-    const apiKey = geminiApiKey || process.env.GEMINI_API_KEY;
-    if (apiKey) {
+  async getClientAndModel(geminiApiKey?: string): Promise<{ client: OpenAI; model: string; isOnline: boolean }> {
+    if (geminiApiKey) {
       try {
         const client = new OpenAI({
-          apiKey,
+          apiKey: geminiApiKey,
           baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
         });
         // Test key validity
@@ -27,9 +26,34 @@ export class AiAnalyzerService {
         return {
           client,
           model: 'gemini-2.5-flash',
+          isOnline: true,
         };
       } catch (err: any) {
-        this.logger.warn(`Gemini API key validation failed: ${err.message}. Falling back to local AI.`);
+        this.logger.warn(`Gemini API key validation failed: ${err.message}.`);
+        const client = new OpenAI({
+          apiKey: geminiApiKey,
+          baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        });
+        return { client, model: 'gemini-2.5-flash', isOnline: false };
+      }
+    }
+
+    const globalApiKey = process.env.GEMINI_API_KEY;
+    if (globalApiKey) {
+      try {
+        const client = new OpenAI({
+          apiKey: globalApiKey,
+          baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        });
+        // Test key validity
+        await client.models.list();
+        return {
+          client,
+          model: 'gemini-2.5-flash',
+          isOnline: true,
+        };
+      } catch (err: any) {
+        this.logger.warn(`Global Gemini API key validation failed: ${err.message}. Falling back to local AI.`);
       }
     }
 
@@ -38,32 +62,34 @@ export class AiAnalyzerService {
       baseURL,
       apiKey: 'local-ai-key',
     });
-    
+
     const configuredModel = process.env.LOCAL_AI_MODEL || 'unsloth/gemma-4-E2B-it-GGUF';
     try {
       const list = await client.models.list();
       const availableModels = list.data.map((m) => m.id);
       if (availableModels.includes(configuredModel)) {
-        return { client, model: configuredModel };
+        return { client, model: configuredModel, isOnline: true };
       }
       const matched = availableModels.find(
         (m) =>
           m.toLowerCase().includes('gemma') ||
           m.toLowerCase().includes(configuredModel.toLowerCase())
       );
-      if (matched) return { client, model: matched };
+      if (matched) return { client, model: matched, isOnline: true };
       if (availableModels.length > 0) {
-        return { client, model: availableModels[0] };
+        // return { client, model: availableModels[0], isOnline: true };
+        return { client, model: '', isOnline: false };
       }
     } catch {
       // Fallback
     }
-    return { client, model: configuredModel };
+    // return { client, model: configuredModel, isOnline: false };
+    return { client, model: '', isOnline: true };
   }
 
   async getActiveModelName(geminiApiKey?: string): Promise<string> {
-    const { model } = await this.getClientAndModel(geminiApiKey);
-    return model;
+    const { model, isOnline } = await this.getClientAndModel(geminiApiKey);
+    return isOnline ? model : 'offline';
   }
 
   async analyzeFailure(

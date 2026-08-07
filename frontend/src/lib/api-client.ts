@@ -32,11 +32,11 @@ export async function login(email: string, password: string) {
   return response.json();
 }
 
-export async function register(email: string, password: string) {
+export async function register(email: string, password: string, name?: string) {
   const response = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, name }),
   });
 
   if (!response.ok) {
@@ -246,7 +246,7 @@ export async function fetchHistory() {
 }
 
 export async function fetchActiveModel(geminiApiKey?: string) {
-  const query = geminiApiKey ? `?geminiApiKey=${encodeURIComponent(geminiApiKey)}` : '';
+  const query = geminiApiKey !== undefined ? `?geminiApiKey=${encodeURIComponent(geminiApiKey)}` : '';
   const response = await fetchWithAuth(`${API_BASE}/runner/model${query}`);
   if (!response.ok) {
     throw new Error('Failed to fetch active model');

@@ -7,12 +7,12 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  async register(@Body() body: { email?: string; password?: string }) {
+  async register(@Body() body: { email?: string; password?: string; name?: string }) {
     if (!body.email || !body.password) {
       throw new BadRequestException('Email and password are required');
     }
-    const user = await this.authService.register(body.email, body.password);
-    return { id: user.id, email: user.email };
+    const user = await this.authService.register(body.email, body.password, body.name);
+    return { id: user.id, email: user.email, name: user.name };
   }
 
   @Post('login')
@@ -30,6 +30,7 @@ export class AuthController {
     return {
       id: user.id,
       email: user.email,
+      name: user.name,
       geminiApiKey: user.geminiApiKey,
     };
   }

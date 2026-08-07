@@ -31,9 +31,14 @@ export class RunnerController {
   ) {}
 
   @Get('model')
-  async getModel(@Req() req: any) {
-    const user = await this.specRepository.manager.findOneBy(UserEntity, { id: req.user.userId });
-    const userKey = user?.geminiApiKey;
+  async getModel(@Req() req: any, @Query('geminiApiKey') geminiApiKey?: string) {
+    let userKey: string | undefined = undefined;
+    if (geminiApiKey !== undefined) {
+      userKey = geminiApiKey.trim() || undefined;
+    } else {
+      const user = await this.specRepository.manager.findOneBy(UserEntity, { id: req.user.userId });
+      userKey = user?.geminiApiKey || undefined;
+    }
     const model = await this.runnerService.getActiveModel(userKey);
     return { model };
   }

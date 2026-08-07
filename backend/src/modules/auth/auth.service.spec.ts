@@ -33,7 +33,7 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('should register a new user successfully', async () => {
+    it('should register a new user successfully without name', async () => {
       mockRepository.findOneBy.mockResolvedValue(null);
 
       const email = 'test@example.com';
@@ -42,6 +42,22 @@ describe('AuthService', () => {
 
       expect(result.email).toBe(email);
       expect(result.passwordHash).toBeDefined();
+      expect(result.name).toBeUndefined();
+      expect(mockRepository.findOneBy).toHaveBeenCalledWith({ email });
+      expect(mockRepository.save).toHaveBeenCalled();
+    });
+
+    it('should register a new user successfully with name', async () => {
+      mockRepository.findOneBy.mockResolvedValue(null);
+
+      const email = 'test2@example.com';
+      const password = 'my-password';
+      const name = 'Alice Smith';
+      const result = await service.register(email, password, name);
+
+      expect(result.email).toBe(email);
+      expect(result.passwordHash).toBeDefined();
+      expect(result.name).toBe(name);
       expect(mockRepository.findOneBy).toHaveBeenCalledWith({ email });
       expect(mockRepository.save).toHaveBeenCalled();
     });
@@ -49,7 +65,7 @@ describe('AuthService', () => {
     it('should throw ConflictException if user already exists', async () => {
       mockRepository.findOneBy.mockResolvedValue({ id: 'existing' });
 
-      await expect(service.register('test@example.com', 'password')).rejects.toThrow(
+      await expect(service.register('test@example.com', 'password', 'Bob')).rejects.toThrow(
         ConflictException,
       );
     });

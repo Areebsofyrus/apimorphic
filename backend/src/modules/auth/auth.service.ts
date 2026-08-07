@@ -13,7 +13,7 @@ export class AuthService {
     private readonly userRepository: Repository<UserEntity>,
   ) {}
 
-  async register(email: string, password: string): Promise<UserEntity> {
+  async register(email: string, password: string, name?: string): Promise<UserEntity> {
     const cleanEmail = email.trim().toLowerCase();
     const existing = await this.userRepository.findOneBy({ email: cleanEmail });
     if (existing) {
@@ -24,11 +24,12 @@ export class AuthService {
     const user = new UserEntity();
     user.email = cleanEmail;
     user.passwordHash = passwordHash;
+    user.name = name?.trim() || undefined;
 
     return this.userRepository.save(user);
   }
 
-  async login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string; geminiApiKey?: string } }> {
+  async login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string; name?: string; geminiApiKey?: string } }> {
     const cleanEmail = email.trim().toLowerCase();
     const user = await this.userRepository.findOneBy({ email: cleanEmail });
     if (!user) {
@@ -51,7 +52,8 @@ export class AuthService {
       user: {
         id: user.id,
         email: user.email,
-        geminiApiKey: user.geminiApiKey,
+        name: user.name,
+        geminiApiKey: user.geminiApiKey || undefined,
       },
     };
   }
@@ -69,7 +71,7 @@ export class AuthService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    user.geminiApiKey = geminiApiKey || undefined;
+    user.geminiApiKey = geminiApiKey.trim() ? geminiApiKey.trim() : null;
     return this.userRepository.save(user);
   }
 }

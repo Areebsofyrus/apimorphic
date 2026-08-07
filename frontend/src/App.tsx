@@ -34,7 +34,7 @@ const queryClient = new QueryClient();
 
 function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tester_jwt_token'));
-  const [user, setUser] = useState<{ id: string; email: string; geminiApiKey?: string } | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string; name?: string; geminiApiKey?: string } | null>(null);
   const [showProfilesModal, setShowProfilesModal] = useState(false);
 
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
@@ -42,7 +42,7 @@ function App() {
   const [activeWorkspaceIndex, setActiveWorkspaceIndex] = useState<number>(0);
   const [selectedEndpointId, setSelectedEndpointId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('testing');
-  const [aiModel, setAiModel] = useState('qwen2.5-coder:3b');
+  const [aiModel, setAiModel] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [showGeminiKey, setShowGeminiKey] = useState(false);
@@ -99,13 +99,17 @@ function App() {
 
   // Save Gemini Key to backend when edited
   useEffect(() => {
-    if (!token) return;
-    fetchActiveModel(geminiApiKey.trim() || undefined)
+    if (!token || !user) return;
+    fetchActiveModel(geminiApiKey.trim())
       .then((data) => setAiModel(data.model))
       .catch(() => {});
 
-    saveKeys(geminiApiKey).catch(() => {});
-  }, [geminiApiKey, token]);
+    // Only save key to database if it is different from the currently loaded user profile key
+    // to avoid overwriting it during load/mount!
+    if (geminiApiKey !== (user.geminiApiKey || '')) {
+      saveKeys(geminiApiKey).catch(() => {});
+    }
+  }, [geminiApiKey, token, user]);
 
   const loadWorkspaces = async () => {
     try {
@@ -369,7 +373,7 @@ function App() {
                       className="h-9 px-3 flex items-center gap-1.5 border-slate-200 hover:bg-slate-50 dark:border-slate-850 cursor-pointer rounded-lg text-xs font-semibold"
                     >
                       <User className="h-4 w-4 text-indigo-500" />
-                      <span className="text-slate-650 max-w-[120px] truncate">{user?.email.split('@')[0]}</span>
+                      <span className="text-slate-650 max-w-[120px] truncate">{user?.name || user?.email.split('@')[0]}</span>
                       <ChevronDown className="h-3 w-3 text-slate-400" />
                     </Button>
                   </PopoverTrigger>
@@ -378,6 +382,12 @@ function App() {
                       <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                         Account Settings
                       </h4>
+                      {user?.name && (
+                        <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 py-0.5">
+                          <User className="h-3.5 w-3.5 text-indigo-500" />
+                          <span>Name: <strong className="text-slate-900 dark:text-slate-100">{user.name}</strong></span>
+                        </div>
+                      )}
                       <p className="text-xs text-slate-700 dark:text-slate-350 truncate">
                         Logged in as: <strong className="text-slate-900 dark:text-slate-100">{user?.email}</strong>
                       </p>
@@ -414,23 +424,22 @@ function App() {
                       </div>
                     </div>
 
-                    <div className="border-t border-slate-100 dark:border-slate-900 pt-3 space-y-2">
-                      <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">
-                        Status & Models
-                      </h4>
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full mr-0.5 animate-pulse" />
-                          <span className="text-xs text-slate-650 dark:text-slate-350">NestJS :3010</span>
+                    {aiModel && aiModel !== 'offline' && (
+                      <div className="border-t border-slate-100 dark:border-slate-900 pt-3 space-y-2">
+                        <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1.5">
+                          Active AI Model
+                        </h4>
+                        <div className="flex items-center gap-1.5 py-0.5">
+                          <span className="inline-block w-2 h-2 bg-emerald-500 rounded-full animate-pulse shrink-0" />
+                          <Badge
+                            variant="outline"
+                            className="bg-violet-50 text-violet-750 border-violet-200 dark:bg-violet-950/20 dark:text-violet-400 dark:border-violet-900 font-mono text-[10px] px-1.5 py-0.5"
+                          >
+                            {aiModel}
+                          </Badge>
                         </div>
-                        <Badge
-                          variant="outline"
-                          className="bg-violet-50 text-violet-750 border-violet-200 dark:bg-violet-950/20 dark:text-violet-400 dark:border-violet-900 font-mono text-[10px] px-1.5 py-0.5"
-                        >
-                          {aiModel}
-                        </Badge>
                       </div>
-                    </div>
+                    )}
 
                     <div className="border-t border-slate-100 dark:border-slate-900 pt-3 flex justify-end">
                       <Button

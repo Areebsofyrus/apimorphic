@@ -15,7 +15,10 @@ export class UserEntity {
   passwordHash!: string;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
-  geminiApiKey?: string;
+  name?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  geminiApiKey?: string | null;
 
   @OneToMany(() => ApiSpecEntity, (workspace) => workspace.user, { cascade: true })
   workspaces!: ApiSpecEntity[];

@@ -185,7 +185,7 @@ interface ApiTestingStudioProps {
 
 export default function ApiTestingStudio({
   endpoints,
-  aiModel = 'qwen2.5-coder:3b',
+  aiModel = '',
   specId,
   selectedEndpointId,
   onSelectedEndpointIdChange,

@@ -3,7 +3,7 @@ import { login, register } from '../lib/api-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
-import { Mail, Lock, Loader2, ArrowRight, HelpCircle } from 'lucide-react';
+import { Mail, Lock, Loader2, ArrowRight, HelpCircle, User } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import RobonitoLogo from '@/components/robonito-logo';
@@ -15,12 +15,17 @@ interface LoginProps {
 
 export default function Login({ onLoginSuccess }: LoginProps) {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSignUp && !name.trim()) {
+      toast.error('Please enter your full name');
+      return;
+    }
     if (!email.trim() || !password.trim()) {
       toast.error('Please enter email and password');
       return;
@@ -29,7 +34,7 @@ export default function Login({ onLoginSuccess }: LoginProps) {
     setLoading(true);
     try {
       if (isSignUp) {
-        await register(email, password);
+        await register(email, password, name);
         toast.success('Account created successfully! Logging you in...');
         const authData = await login(email, password);
         onLoginSuccess(authData.token);
@@ -76,6 +81,25 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {isSignUp && (
+              <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-200">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="pl-9 h-10 text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1.5">
               <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
                 Email Address
