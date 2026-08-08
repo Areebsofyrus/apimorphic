@@ -61,7 +61,7 @@ jobs:
             npm run build
 
             # Reload NestJS app via PM2
-            pm2 reload apimorphic || pm2 start dist/main.js --name apimorphic
+            pm2 restart apimorphic
 
       - name: Build client app on server
         uses: appleboy/ssh-action@v1.0.3
