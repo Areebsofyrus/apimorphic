@@ -57,11 +57,15 @@ jobs:
             # Install root dependencies (which installs workspace packages)
             npm ci
 
+            cd "/backend"
+
+            npm install
+
             # Build Nest backend
-            npm run build:backend
+            npm run build
 
             # Reload NestJS app via PM2
-            pm2 reload apimorphic || pm2 start backend/dist/main.js --name apimorphic
+            pm2 reload apimorphic || pm2 start dist/main.js --name apimorphic
 
       - name: Build client app on server
         uses: appleboy/ssh-action@v1.0.3
