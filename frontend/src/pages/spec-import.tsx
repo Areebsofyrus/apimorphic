@@ -151,12 +151,12 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
                   <strong>⚠️ Localhost Notice:</strong> Because this platform runs in the cloud, it cannot directly reach your <code>localhost</code>. 
                 </p>
                 <p>
-                  <strong>🔧 Tunnel Setup (ngrok):</strong> Expose your port (e.g. <code>ngrok http 3000</code>). To prevent ngrok's browser warning page from blocking imports, bypass it by running the tunnel command:
+                  <strong>🔧 Port Forwarding & Tunnels:</strong> If you are using VS Code, you can use its built-in <strong>Port Forwarding</strong> panel to make your local port public. Alternatively, use a tunneling tool like <strong>ngrok</strong> to expose your port (e.g. <code>ngrok http 3000</code>). To prevent ngrok's browser warning page from blocking imports, bypass it by running:
                   <br />
                   <code className="block bg-slate-900 text-slate-100 p-1.5 rounded mt-1 text-[11px] font-mono">
                     ngrok http 3000 --oauth-allow-emails=YOUR_EMAIL
                   </code>
-                  Alternatively, use <strong>Localtunnel</strong> (which has no warning page by default):
+                  Or, use <strong>Localtunnel</strong> (which has no warning page by default):
                   <br />
                   <code className="block bg-slate-900 text-slate-100 p-1.5 rounded mt-1 text-[11px] font-mono">
                     npx localtunnel --port 3000
