@@ -49,17 +49,13 @@ jobs:
             node -v
             npm -v
 
-            cd "/var/www/apimorphic"
+            cd "/var/www/apimorphic/backend"
             git fetch origin
             git checkout main
             git pull origin main
 
             # Install root dependencies (which installs workspace packages)
             npm ci
-
-            cd "/backend"
-
-            npm install
 
             # Build Nest backend
             npm run build
