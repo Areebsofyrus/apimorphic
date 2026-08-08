@@ -139,17 +139,37 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
               </div>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-4">
               <label className="text-sm font-semibold text-foreground block">
                 Live Swagger / OpenAPI Specification URL
               </label>
               <p className="text-xs text-muted-foreground">
                 Enter the URL to your Swagger JSON definition (e.g. <code>http://localhost:3000/api-json</code>)
               </p>
+              <div className="bg-slate-50 border border-slate-200 text-slate-800 text-xs rounded-md p-3 mb-2 space-y-2">
+                <p>
+                  <strong>⚠️ Localhost Notice:</strong> Because this platform runs in the cloud, it cannot directly reach your <code>localhost</code>. 
+                </p>
+                <p>
+                  <strong>🔧 Tunnel Setup (ngrok):</strong> Expose your port (e.g. <code>ngrok http 3000</code>). To prevent ngrok's browser warning page from blocking imports, bypass it by running the tunnel command:
+                  <br />
+                  <code className="block bg-slate-900 text-slate-100 p-1.5 rounded mt-1 text-[11px] font-mono">
+                    ngrok http 3000 --oauth-allow-emails=YOUR_EMAIL
+                  </code>
+                  Alternatively, use <strong>Localtunnel</strong> (which has no warning page by default):
+                  <br />
+                  <code className="block bg-slate-900 text-slate-100 p-1.5 rounded mt-1 text-[11px] font-mono">
+                    npx localtunnel --port 3000
+                  </code>
+                </p>
+                <p className="bg-amber-50 dark:bg-amber-955/20 border border-amber-250 p-2 rounded text-amber-900 dark:text-amber-300">
+                  <strong>💡 Tip:</strong> If your tunnel shows an authentication or verification splash screen, open the public URL in a new tab in this same browser first, click "Visit Site" or authorize it, and then try importing here again.
+                </p>
+              </div>
               <Input
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="e.g. http://localhost:3000/api-json"
+                placeholder="e.g. https://xxxx.loca.lt/api-json"
                 className="font-mono text-sm"
               />
             </div>

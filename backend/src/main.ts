@@ -4,6 +4,11 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  
+  // Increase payload limit for large OpenAPI/Postman specs
+  const express = require('express');
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Enable CORS for VS Code Webview & external Web App access
   app.enableCors({
