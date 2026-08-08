@@ -102,6 +102,27 @@ export async function parseSwaggerSpec(spec: string) {
   return response.json();
 }
 
+export async function parsePostmanSpec(collectionStr: string) {
+  let collectionJson;
+  try {
+    collectionJson = JSON.parse(collectionStr);
+  } catch (err: any) {
+    throw new Error('Invalid JSON format: ' + err.message);
+  }
+
+  const response = await fetchWithAuth(`${API_BASE}/parser/postman`, {
+    method: 'POST',
+    body: JSON.stringify({ collection: collectionJson }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody.message || `Failed to parse Postman collection: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 export async function parseSwaggerUrl(url: string) {
   const response = await fetchWithAuth(`${API_BASE}/parser/swagger-url`, {
     method: 'POST',

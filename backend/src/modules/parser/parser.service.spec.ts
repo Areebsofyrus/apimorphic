@@ -61,6 +61,52 @@ describe('ParserService', () => {
     expect(result.endpoints[0].method).toEqual('GET');
   });
 
+  it('should parse Postman Collection JSON with missing or incomplete URLs', async () => {
+    const samplePostman = {
+      info: {
+        name: 'Postman Collection with Missing/Empty URLs',
+        schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
+      },
+      item: [
+        {
+          name: 'Request with Missing URL',
+          request: {
+            method: 'POST',
+          },
+        },
+        {
+          name: 'Request with String URL (no path)',
+          request: {
+            method: 'GET',
+            url: 'http://example.com',
+          },
+        },
+        {
+          name: 'Request with Object URL (no path)',
+          request: {
+            method: 'PUT',
+            url: {
+              raw: 'http://example.com',
+            },
+          },
+        },
+      ],
+    };
+
+    const result = await service.parsePostmanCollection(samplePostman);
+    expect(result.title).toEqual('Postman Collection with Missing/Empty URLs');
+    expect(result.endpoints.length).toEqual(3);
+    
+    expect(result.endpoints[0].path).toEqual('/');
+    expect(result.endpoints[0].method).toEqual('POST');
+    
+    expect(result.endpoints[1].path).toEqual('/');
+    expect(result.endpoints[1].method).toEqual('GET');
+    
+    expect(result.endpoints[2].path).toEqual('/');
+    expect(result.endpoints[2].method).toEqual('PUT');
+  });
+
   it('should detect added, modified, and removed endpoints', () => {
     const oldEndpoints: EndpointSpec[] = [
       { id: 'GET_/users', path: '/users', method: 'GET', summary: 'Get Users' },

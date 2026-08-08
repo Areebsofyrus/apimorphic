@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, CheckCircle2, FileText, Link } from 'lucide-react';
 import { MethodBadge } from '@/components/method-badge';
-import { parseSwaggerSpec, parseSwaggerUrl } from '@/lib/api-client';
+import { parseSwaggerSpec, parseSwaggerUrl, parsePostmanSpec } from '@/lib/api-client';
 import { toast } from 'sonner';
 import { Endpoint } from '@/types/api';
 
@@ -17,6 +17,7 @@ interface SpecImportProps {
 
 export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
   const [importMode, setImportMode] = useState<'paste' | 'url'>('paste');
+  const [format, setFormat] = useState<'swagger' | 'postman'>('swagger');
   const [specInput, setSpecInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [isParsing, setIsParsing] = useState(false);
@@ -39,9 +40,16 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
 
     setIsParsing(true);
     try {
-      const response = importMode === 'paste'
-        ? await parseSwaggerSpec(specInput)
-        : await parseSwaggerUrl(urlInput);
+      let response;
+      if (importMode === 'paste') {
+        if (format === 'swagger') {
+          response = await parseSwaggerSpec(specInput);
+        } else {
+          response = await parsePostmanSpec(specInput);
+        }
+      } else {
+        response = await parseSwaggerUrl(urlInput);
+      }
       
       const result = response.result || response;
       setParsedData(result);
@@ -58,7 +66,7 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
     <ScrollArea className="h-full">
       <div className="max-w-5xl mx-auto p-8 space-y-6">
         <div>
-          <h2 className="text-2xl font-bold text-foreground mb-2">Import OpenAPI Specification</h2>
+          <h2 className="text-2xl font-bold text-foreground mb-2">Import API Specification</h2>
           <p className="text-muted-foreground text-sm">
             Paste your raw JSON/YAML spec or load it from a live URL to discover endpoints.
           </p>
@@ -88,17 +96,47 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
 
         <Card className="p-5 space-y-4">
           {importMode === 'paste' ? (
-            <div>
-              <label className="text-sm font-semibold text-foreground mb-3 block">
-                OpenAPI Specification (JSON or YAML)
-              </label>
-              <Textarea
-                value={specInput}
-                onChange={(e) => setSpecInput(e.target.value)}
-                placeholder="Paste your raw OpenAPI spec (JSON/YAML) here..."
-                className="font-mono text-sm min-h-[300px] resize-none"
-                data-testid="textarea-spec-input"
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-foreground mb-2 block">
+                  Select Format
+                </label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={format === 'swagger' ? 'outline' : 'ghost'}
+                    onClick={() => setFormat('swagger')}
+                    className={format === 'swagger' ? 'border-indigo-500 text-indigo-650 bg-indigo-50/50 hover:bg-indigo-50/50' : 'text-slate-500'}
+                  >
+                    Swagger / OpenAPI (JSON/YAML)
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={format === 'postman' ? 'outline' : 'ghost'}
+                    onClick={() => setFormat('postman')}
+                    className={format === 'postman' ? 'border-indigo-500 text-indigo-650 bg-indigo-50/50 hover:bg-indigo-50/50' : 'text-slate-500'}
+                  >
+                    Postman Collection v2.1 (JSON)
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-semibold text-foreground mb-3 block">
+                  {format === 'swagger' ? 'OpenAPI Specification (JSON or YAML)' : 'Postman Collection (JSON)'}
+                </label>
+                <Textarea
+                  value={specInput}
+                  onChange={(e) => setSpecInput(e.target.value)}
+                  placeholder={format === 'swagger' 
+                    ? "Paste your raw OpenAPI spec (JSON/YAML) here..." 
+                    : "Paste your Postman Collection JSON here..."}
+                  className="font-mono text-sm min-h-[300px] resize-none"
+                  data-testid="textarea-spec-input"
+                />
+              </div>
             </div>
           ) : (
             <div className="space-y-2">

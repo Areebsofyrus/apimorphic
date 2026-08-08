@@ -125,7 +125,8 @@ export class ParserService {
         const request = item.request;
         if (!request) return;
 
-        const pathStr = '/' + request.url.path.join('/');
+        const pathSegments = request.url && Array.isArray(request.url.path) ? request.url.path : [];
+        const pathStr = '/' + pathSegments.join('/');
         const method = request.method.toUpperCase();
 
         let requestSchema: Record<string, unknown> | undefined;

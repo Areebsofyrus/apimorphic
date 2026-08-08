@@ -8,12 +8,14 @@ import RobonitoLogo from '@/components/robonito-logo';
 import APIMorphicLogo from '@/components/apimorphic-logo';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Zap, FileInput, Database, BarChart3, Loader2, RefreshCw, Layers, Link, Trash2, Eye, EyeOff, LogOut, Settings, MoreVertical, ChevronDown, User, LayoutDashboard } from 'lucide-react';
+import { Zap, FileInput, Database, BarChart3, Loader2, RefreshCw, Layers, Link, Trash2, Eye, EyeOff, LogOut, Settings, MoreVertical, ChevronDown, User, LayoutDashboard, HelpCircle } from 'lucide-react';
 import ApiTestingStudio from '@/pages/api-testing-studio';
 import SpecImport from '@/pages/spec-import';
 import DatasetsMappings from '@/pages/datasets-mappings';
 import AiDiagnostics from '@/pages/ai-diagnostics';
 import Login from '@/pages/login';
+import Landing from '@/pages/landing';
+import SystemGuide from '@/pages/system-guide';
 import ProfilesSheet from '@/components/profiles-sheet';
 import {
   DropdownMenu,
@@ -33,6 +35,17 @@ import { toast } from 'sonner';
 const queryClient = new QueryClient();
 
 function App() {
+  if (window.location.pathname === '/guide') {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <SystemGuide standalone={true} />
+          <Toaster position="top-right" />
+        </TooltipProvider>
+      </QueryClientProvider>
+    );
+  }
+
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tester_jwt_token'));
   const [user, setUser] = useState<{ id: string; email: string; name?: string; geminiApiKey?: string } | null>(null);
   const [showProfilesModal, setShowProfilesModal] = useState(false);
@@ -195,7 +208,7 @@ function App() {
   if (!token) {
     return (
       <TooltipProvider>
-        <Login onLoginSuccess={(t) => setToken(t)} />
+        <Landing onLoginSuccess={(t) => setToken(t)} />
         <Toaster position="top-right" />
       </TooltipProvider>
     );
@@ -441,7 +454,16 @@ function App() {
                       </div>
                     )}
 
-                    <div className="border-t border-slate-100 dark:border-slate-900 pt-3 flex justify-end">
+                    <div className="border-t border-slate-100 dark:border-slate-900 pt-3 flex flex-col gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full h-8.5 text-xs text-indigo-650 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer rounded-lg flex items-center justify-center gap-1.5 font-semibold"
+                        onClick={() => window.open('/guide', '_blank')}
+                      >
+                        <HelpCircle className="h-3.5 w-3.5 text-indigo-500" />
+                        Help & System Guide
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"

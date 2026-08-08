@@ -11,9 +11,10 @@ import APIMorphicLogo from '@/components/apimorphic-logo';
 
 interface LoginProps {
   onLoginSuccess: (token: string) => void;
+  isEmbed?: boolean;
 }
 
-export default function Login({ onLoginSuccess }: LoginProps) {
+export default function Login({ onLoginSuccess, isEmbed = false }: LoginProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -49,6 +50,109 @@ export default function Login({ onLoginSuccess }: LoginProps) {
       setLoading(false);
     }
   };
+
+  if (isEmbed) {
+    return (
+      <div className="w-full">
+        <Card className="p-6 border-none bg-transparent shadow-none space-y-4">
+          <div className="text-center space-y-1">
+            <h2 className="text-base font-extrabold tracking-tight text-slate-850 dark:text-indigo-150">
+              {isSignUp ? 'Create Studio Account' : 'Sign In to Studio'}
+            </h2>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+              {isSignUp ? 'Join to auto-generate test suites' : 'Access your workspaces and run tests'}
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-3.5">
+            {isSignUp && (
+              <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-200">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="pl-9 h-10 text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="email"
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-9 h-10 text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block">
+                Password
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-9 h-10 text-sm bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                  required
+                />
+              </div>
+            </div>
+
+            <Button
+              type="submit"
+              disabled={loading}
+              className="w-full h-10 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm transition-all duration-150 flex items-center justify-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  {isSignUp ? 'Create Account' : 'Sign In'}
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
+            </Button>
+          </form>
+
+          <div className="relative flex py-0.5 items-center">
+            <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
+            <span className="flex-shrink mx-2 text-[9px] text-muted-foreground uppercase tracking-widest font-semibold">Or</span>
+            <div className="flex-grow border-t border-slate-200 dark:border-slate-800"></div>
+          </div>
+
+          <div className="text-center pb-1">
+            <button
+              type="button"
+              className="text-xs font-semibold text-indigo-600 hover:text-indigo-850 dark:text-indigo-400 dark:hover:text-indigo-300 cursor-pointer transition-colors"
+              onClick={() => setIsSignUp(!isSignUp)}
+            >
+              {isSignUp ? 'Already have an account? Sign In' : 'New to APIMorphic? Create Account'}
+            </button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-6 relative overflow-hidden">
