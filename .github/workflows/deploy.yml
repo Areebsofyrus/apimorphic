@@ -79,6 +79,9 @@ jobs:
 
             cd "/var/www/apimorphic"
             
+            # Install monorepo dependencies (installs frontend packages & vite)
+            npm ci
+
             # Build Vite frontend
             npm run build:frontend
 
