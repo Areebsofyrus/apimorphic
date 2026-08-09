@@ -111,7 +111,7 @@ export default function Landing({ onLoginSuccess }: LandingProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => window.open('/guide', '_blank')}
+            onClick={() => window.open('/docs', '_blank')}
             className="text-xs font-semibold text-slate-650 hover:text-slate-900 dark:text-slate-350 dark:hover:text-white flex items-center gap-1.5 cursor-pointer rounded-lg h-9"
           >
             <HelpCircle className="h-3.5 w-3.5 text-indigo-500" />

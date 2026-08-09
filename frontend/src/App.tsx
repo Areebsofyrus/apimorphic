@@ -35,7 +35,7 @@ import { toast } from 'sonner';
 const queryClient = new QueryClient();
 
 function App() {
-  if (window.location.pathname === '/guide') {
+  if (window.location.pathname === '/docs') {
     return (
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
@@ -459,7 +459,7 @@ function App() {
                         variant="outline"
                         size="sm"
                         className="w-full h-8.5 text-xs text-indigo-650 hover:bg-slate-50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 cursor-pointer rounded-lg flex items-center justify-center gap-1.5 font-semibold"
-                        onClick={() => window.open('/guide', '_blank')}
+                        onClick={() => window.open('/docs', '_blank')}
                       >
                         <HelpCircle className="h-3.5 w-3.5 text-indigo-500" />
                         Help & System Guide
