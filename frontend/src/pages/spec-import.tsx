@@ -64,7 +64,7 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
 
   return (
     <ScrollArea className="h-full">
-      <div className="max-w-5xl mx-auto p-8 space-y-6">
+      <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-6">
         <div>
           <h2 className="text-2xl font-bold text-foreground mb-2">Import API Specification</h2>
           <p className="text-muted-foreground text-sm">
@@ -94,20 +94,20 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
           </Button>
         </div>
 
-        <Card className="p-5 space-y-4">
+        <Card className="p-4 md:p-5 space-y-4">
           {importMode === 'paste' ? (
             <div className="space-y-4">
               <div>
                 <label className="text-sm font-semibold text-foreground mb-2 block">
                   Select Format
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <Button
                     type="button"
                     size="sm"
                     variant={format === 'swagger' ? 'outline' : 'ghost'}
                     onClick={() => setFormat('swagger')}
-                    className={format === 'swagger' ? 'border-indigo-500 text-indigo-650 bg-indigo-50/50 hover:bg-indigo-50/50' : 'text-slate-500'}
+                    className={format === 'swagger' ? 'border-indigo-500 text-indigo-650 bg-indigo-50/50 hover:bg-indigo-50/50 text-xs w-full sm:w-auto text-left justify-start' : 'text-slate-500 text-xs w-full sm:w-auto text-left justify-start'}
                   >
                     Swagger / OpenAPI (JSON/YAML)
                   </Button>
@@ -116,7 +116,7 @@ export default function SpecImport({ onEndpointsParsed }: SpecImportProps) {
                     size="sm"
                     variant={format === 'postman' ? 'outline' : 'ghost'}
                     onClick={() => setFormat('postman')}
-                    className={format === 'postman' ? 'border-indigo-500 text-indigo-650 bg-indigo-50/50 hover:bg-indigo-50/50' : 'text-slate-500'}
+                    className={format === 'postman' ? 'border-indigo-500 text-indigo-650 bg-indigo-50/50 hover:bg-indigo-50/50 text-xs w-full sm:w-auto text-left justify-start' : 'text-slate-500 text-xs w-full sm:w-auto text-left justify-start'}
                   >
                     Postman Collection v2.1 (JSON)
                   </Button>

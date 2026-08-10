@@ -220,9 +220,9 @@ function App() {
         <div className="min-h-screen w-full flex flex-col bg-background">
           {/* Global Header */}
           <header className="border-b border-border bg-card">
-            <div className="px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+            <div className="px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 md:gap-4">
               {/* Left Side: Brand & Workspace Selector */}
-              <div className="flex items-center gap-4">
+              <div className="flex items-center justify-between md:justify-start gap-4 w-full md:w-auto">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div className="flex flex-col items-center relative cursor-help select-none pr-5">
@@ -337,7 +337,7 @@ function App() {
               </div>
 
               {/* Right Side: Profile Switcher & Popover Settings */}
-              <div className="flex items-center gap-4">
+              <div className="flex items-center justify-between md:justify-end gap-4 w-full md:w-auto border-t md:border-t-0 pt-2 md:pt-0">
                 {/* Profile Selector */}
                 {currentWorkspace && (
                   <div className="flex items-center gap-1 animate-in fade-in duration-200">
@@ -482,8 +482,8 @@ function App() {
 
           {/* Main Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-            <div className="border-b border-slate-200 bg-white px-6 shadow-xs">
-              <TabsList className="h-12 bg-transparent border-none p-0 gap-6 flex">
+            <div className="border-b border-slate-200 bg-white px-4 md:px-6 shadow-xs overflow-x-auto scrollbar-none">
+              <TabsList className="h-12 bg-transparent border-none p-0 gap-6 flex min-w-max">
                 <TabsTrigger
                   value="testing"
                   className="data-[state=active]:text-indigo-600 data-[state=active]:border-indigo-600 border-b-2 border-transparent h-12 px-1 rounded-none shadow-none font-semibold text-slate-500 hover:text-slate-800 transition-all flex items-center gap-2 cursor-pointer text-xs uppercase tracking-wider"

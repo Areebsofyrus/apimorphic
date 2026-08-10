@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { VariableInput, VariableTextarea } from '@/components/ui/variable-input';
 import { Badge } from '@/components/ui/badge';
-import { Search, Play, PlayCircle, Trash2, Loader2, Cpu, Sparkles, Terminal, PlusCircle, Save, Settings, Key, History, Eye, EyeOff, Database } from 'lucide-react';
+import { Search, Play, PlayCircle, Trash2, Loader2, Cpu, Sparkles, Terminal, PlusCircle, Save, Settings, Key, History, Eye, EyeOff, Database, Menu, X, ArrowLeft } from 'lucide-react';
 import { EndpointCard } from '@/components/endpoint-card';
 import { ScenarioCard, HTTP_STATUS_DESCRIPTIONS } from '@/components/scenario-card';
 import { ExecutionResultCard } from '@/components/execution-result-card';
@@ -200,10 +200,25 @@ export default function ApiTestingStudio({
   const [searchQuery, setSearchQuery] = useState('');
   const [methodFilter, setMethodFilter] = useState<string>('ALL');
   const [sidebarWidth, setSidebarWidth] = useState(320);
+
+  const [isMobile, setIsMobile] = useState(false);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(true);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   
   const selectedEndpoint = endpoints.find(e => e.id === selectedEndpointId) || endpoints[0] || null;
   const setSelectedEndpoint = (endpoint: Endpoint | null) => {
     onSelectedEndpointIdChange(endpoint?.id || null);
+    if (isMobile) {
+      setShowMobileSidebar(false);
+    }
   };
 
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
@@ -645,9 +660,23 @@ export default function ApiTestingStudio({
   }, [executionResults]);
 
   return (
-    <div className="flex h-[calc(100vh-8rem)]">
+    <div className="flex h-[calc(100vh-8rem)] relative">
       {/* Column 1: API Explorer Sidebar */}
-      <div style={{ width: sidebarWidth }} className="border-r border-border bg-card flex flex-col shrink-0">
+      <div 
+        style={isMobile ? { width: '100%' } : { width: sidebarWidth }} 
+        className={isMobile 
+          ? `${showMobileSidebar ? 'fixed inset-0 z-50 bg-background flex flex-col w-full h-full' : 'hidden'}`
+          : "border-r border-border bg-card flex flex-col shrink-0"
+        }
+      >
+        {isMobile && (
+          <div className="p-4 border-b border-border flex items-center justify-between bg-card">
+            <span className="font-bold text-sm text-foreground">Select API Endpoint</span>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowMobileSidebar(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
         <div className="p-4 border-b border-border space-y-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -693,28 +722,46 @@ export default function ApiTestingStudio({
         </ScrollArea>
       </div>
       {/* Resizable drag handle */}
-      <div
-        className="w-1 cursor-col-resize hover:bg-indigo-500 bg-slate-200 transition-colors duration-150 shrink-0 select-none"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          const startX = e.clientX;
-          const startWidth = sidebarWidth;
-          const handleMouseMove = (moveEvent: MouseEvent) => {
-            const newWidth = Math.max(220, Math.min(600, startWidth + (moveEvent.clientX - startX)));
-            setSidebarWidth(newWidth);
-          };
-          const handleMouseUp = () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-          };
-          window.addEventListener('mousemove', handleMouseMove);
-          window.addEventListener('mouseup', handleMouseUp);
-        }}
-      />
+      {!isMobile && (
+        <div
+          className="w-1 cursor-col-resize hover:bg-indigo-500 bg-slate-200 transition-colors duration-150 shrink-0 select-none"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = sidebarWidth;
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const newWidth = Math.max(220, Math.min(600, startWidth + (moveEvent.clientX - startX)));
+              setSidebarWidth(newWidth);
+            };
+            const handleMouseUp = () => {
+              window.removeEventListener('mousemove', handleMouseMove);
+              window.removeEventListener('mouseup', handleMouseUp);
+            };
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+          }}
+        />
+      )}
 
       {/* Column 2: Request Studio */}
       <div className="flex-1 flex flex-col bg-background">
         <div className="p-4 border-b border-border space-y-4">
+          {isMobile && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full flex items-center justify-between border-indigo-250 text-indigo-700 bg-indigo-50/20 font-semibold h-9 rounded-lg hover:bg-indigo-50/50"
+              onClick={() => setShowMobileSidebar(true)}
+            >
+              <span className="flex items-center gap-1.5 text-xs">
+                <Menu className="h-4 w-4 text-indigo-500" />
+                Select / Change Endpoint
+              </span>
+              <span className="text-[10px] font-mono bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
+                {selectedEndpoint ? `${selectedEndpoint.method} ${selectedEndpoint.path}` : 'None'}
+              </span>
+            </Button>
+          )}
           <div>
             <label className="text-xs font-semibold text-muted-foreground mb-2 block">
               Target Base URL
@@ -817,7 +864,7 @@ export default function ApiTestingStudio({
                   </div>
 
                   {showSettings && (
-                    <div className="p-4 border-t border-slate-200 bg-white grid grid-cols-2 gap-4">
+                    <div className="p-4 border-t border-slate-200 bg-white grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Left Column: Headers & Auth */}
                       <div className="space-y-3">
                         <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
@@ -869,7 +916,7 @@ export default function ApiTestingStudio({
                       </div>
 
                       {/* Right Column: Prerequisites */}
-                      <div className="space-y-3 border-l border-slate-100 pl-4">
+                      <div className="space-y-3 md:border-l border-slate-100 md:pl-4 pl-0 border-t md:border-t-0 pt-4 md:pt-0">
                         <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                           <Cpu className="h-3.5 w-3.5 text-indigo-500" /> Prerequisite Step (Token Extraction)
                         </h4>
@@ -1580,8 +1627,8 @@ export default function ApiTestingStudio({
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-5 gap-4 items-stretch">
-                    <Card className="p-4 col-span-3 flex flex-col justify-between">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-stretch">
+                    <Card className="p-4 col-span-1 md:col-span-3 flex flex-col justify-between">
                       <div className="space-y-4">
                         <div className="flex justify-between items-center flex-wrap gap-2 mb-1">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
@@ -1793,7 +1840,7 @@ export default function ApiTestingStudio({
                       </div>
                     </Card>
 
-                    <Card className="p-4 col-span-2 bg-slate-50 border-slate-200 flex flex-col h-full justify-between">
+                    <Card className="p-4 col-span-1 md:col-span-2 bg-slate-50 border-slate-200 flex flex-col h-full justify-between">
                       <div className="space-y-3 flex-1 flex flex-col">
                         <div className="flex justify-between items-center flex-wrap gap-2">
                           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
