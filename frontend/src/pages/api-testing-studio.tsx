@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { VariableInput, VariableTextarea } from '@/components/ui/variable-input';
 import { Badge } from '@/components/ui/badge';
-import { Search, Play, PlayCircle, Trash2, Loader2, Cpu, Sparkles, Terminal, PlusCircle, Save, Settings, Key, History, Eye, EyeOff, Database, Menu, X, ArrowLeft } from 'lucide-react';
+import { Search, Play, PlayCircle, Trash2, Loader2, Cpu, Sparkles, Terminal, PlusCircle, Save, Settings, Key, History, Eye, EyeOff, Database, Menu, X, ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import { EndpointCard } from '@/components/endpoint-card';
 import { ScenarioCard, HTTP_STATUS_DESCRIPTIONS } from '@/components/scenario-card';
 import { ExecutionResultCard } from '@/components/execution-result-card';
@@ -220,6 +220,9 @@ export default function ApiTestingStudio({
       setShowMobileSidebar(false);
     }
   };
+
+  const [generatedScenariosExpanded, setGeneratedScenariosExpanded] = useState(true);
+  const [savedScenariosExpanded, setSavedScenariosExpanded] = useState(true);
 
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL);
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
@@ -536,6 +539,12 @@ export default function ApiTestingStudio({
 
     for (const scenario of allList) {
       try {
+        if (scenario.pathParams) {
+          setPathParams(scenario.pathParams);
+        }
+        if (scenario.queryParams) {
+          setQueryParams(scenario.queryParams);
+        }
         const result = await executeTest({
           workspaceId: specId || '',
           baseUrl: substitute(baseUrl),
@@ -610,6 +619,12 @@ export default function ApiTestingStudio({
 
     for (const scenario of selectedList) {
       try {
+        if (scenario.pathParams) {
+          setPathParams(scenario.pathParams);
+        }
+        if (scenario.queryParams) {
+          setQueryParams(scenario.queryParams);
+        }
         const result = await executeTest({
           workspaceId: specId || '',
           baseUrl: substitute(baseUrl),
@@ -1397,10 +1412,17 @@ export default function ApiTestingStudio({
                   {generatedScenarios.length > 0 && (
                     <div className="pt-2 border-t border-border space-y-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-indigo-800 flex items-center gap-1.5 uppercase tracking-wider">
+                        <button
+                          onClick={() => setGeneratedScenariosExpanded(!generatedScenariosExpanded)}
+                          className="text-xs font-bold text-indigo-800 flex items-center gap-1.5 uppercase tracking-wider hover:text-indigo-950 transition-colors focus:outline-none cursor-pointer"
+                        >
+                          {generatedScenariosExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                           <Sparkles className="h-4 w-4 text-indigo-600 animate-pulse" />
-                          Generated AI Test Cases ({generatedScenarios.length} Unsaved)
-                        </span>
+                          {generatedScenarios.some(s => s.generationRule === 'ai_enriched') 
+                            ? `Generated AI Test Cases (${generatedScenarios.length} Unsaved)`
+                            : `Generated Test Cases (${generatedScenarios.length} Unsaved)`
+                          }
+                        </button>
                         <div className="flex gap-2">
                           <Button
                             size="sm"
@@ -1447,8 +1469,9 @@ export default function ApiTestingStudio({
                           </Button>
                         </div>
                       </div>
-                      <div className="space-y-3">
-                        {generatedScenarios.map((scenario, idx) => (
+                      {generatedScenariosExpanded && (
+                        <div className="space-y-3">
+                          {generatedScenarios.map((scenario, idx) => (
                           <ScenarioCard
                             key={`gen-${idx}`}
                             scenario={scenario}
@@ -1465,7 +1488,13 @@ export default function ApiTestingStudio({
                             onLoadIntoEditor={() => {
                               updateCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
                               setEditingScenario(scenario);
-                              toast.success(`Loaded "${scenario.scenarioName}" into JSON Editor for editing`);
+                              if (scenario.pathParams) {
+                                setPathParams(scenario.pathParams);
+                              }
+                              if (scenario.queryParams) {
+                                setQueryParams(scenario.queryParams);
+                              }
+                              toast.success(`Loaded "${scenario.scenarioName}" into JSON Editor and Params for editing`);
                             }}
                             onSave={async () => {
                               try {
@@ -1493,88 +1522,112 @@ export default function ApiTestingStudio({
                                 toast.error('Failed to save scenario.');
                               }
                             }}
-                            onUpdatePayload={async (updatedPayload, updatedExpected) => {
+                            onUpdatePayload={async (updatedPayload, updatedExpected, updatedTag, updatedPath, updatedQuery) => {
                               updateGeneratedScenarios((prev) =>
-                                prev.map((s, i) => (i === idx ? { ...s, payload: updatedPayload, expectedResult: updatedExpected } : s))
+                                prev.map((s, i) => (i === idx ? { 
+                                  ...s, 
+                                  payload: updatedPayload, 
+                                  expectedResult: updatedExpected,
+                                  generationRule: updatedTag || s.generationRule,
+                                  pathParams: updatedPath || s.pathParams,
+                                  queryParams: updatedQuery || s.queryParams
+                                } : s))
                               );
                               // If this scenario is currently being edited in the raw JSON editor, keep it in sync!
                               if (editingScenario?.scenarioName === scenario.scenarioName) {
                                 updateCustomPayload(JSON.stringify(updatedPayload, null, 2));
+                                if (updatedPath) setPathParams(updatedPath);
+                                if (updatedQuery) setQueryParams(updatedQuery);
                               }
                             }}
                           />
                         ))}
                       </div>
+                      )}
                     </div>
                   )}
 
                   {/* Saved Test Cases Section */}
                   <div className="pt-2 border-t border-border space-y-3">
-                    <span className="text-xs font-bold text-slate-800 uppercase tracking-wider block">
+                    <button
+                      onClick={() => setSavedScenariosExpanded(!savedScenariosExpanded)}
+                      className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5 hover:text-slate-950 transition-colors focus:outline-none cursor-pointer"
+                    >
+                      {savedScenariosExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                       Saved Test Cases Suite ({scenarios.length})
-                    </span>
+                    </button>
 
-                    {isScenariosLoading ? (
-                      <Card className="p-8 flex items-center justify-center gap-3">
-                        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">Loading test suite...</span>
-                      </Card>
-                    ) : scenarios.length > 0 ? (
-                      scenarios.map((scenario, idx) => (
-                        <ScenarioCard
-                          key={idx}
-                          scenario={scenario}
-                          isSelected={selectedScenarios.has(`saved-${idx}`)}
-                          onToggle={(selected) => {
-                            const newSelected = new Set(selectedScenarios);
-                            if (selected) {
-                              newSelected.add(`saved-${idx}`);
-                            } else {
-                              newSelected.delete(`saved-${idx}`);
-                            }
-                            setSelectedScenarios(newSelected);
-                          }}
-                          onLoadIntoEditor={() => {
-                            updateCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
-                            setEditingScenario(scenario);
-                            toast.success(`Loaded "${scenario.scenarioName}" into JSON Editor for editing`);
-                          }}
-                          onDelete={async () => {
-                            if (scenario.id) {
-                              try {
-                                await deleteCustomScenario(scenario.id);
-                                toast.success('Deleted test case from database.');
-                                loadScenarios(selectedEndpoint.id);
-                              } catch {
-                                toast.error('Failed to delete custom scenario.');
+                    {savedScenariosExpanded && (
+                      isScenariosLoading ? (
+                        <Card className="p-8 flex items-center justify-center gap-3">
+                          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">Loading test suite...</span>
+                        </Card>
+                      ) : scenarios.length > 0 ? (
+                        scenarios.map((scenario, idx) => (
+                          <ScenarioCard
+                            key={idx}
+                            scenario={scenario}
+                            isSelected={selectedScenarios.has(`saved-${idx}`)}
+                            onToggle={(selected) => {
+                              const newSelected = new Set(selectedScenarios);
+                              if (selected) {
+                                newSelected.add(`saved-${idx}`);
+                              } else {
+                                newSelected.delete(`saved-${idx}`);
                               }
-                            }
-                          }}
-                          onUpdatePayload={async (updatedPayload, updatedExpected) => {
-                            await saveCustomScenario({
-                              workspaceId: specId || '',
-                              endpointId: selectedEndpoint.id,
-                              scenarioName: scenario.scenarioName,
-                              expectedResult: updatedExpected,
-                              payload: updatedPayload,
-                              generationRule: scenario.generationRule,
-                              pathParams: scenario.pathParams,
-                              queryParams: scenario.queryParams,
-                            });
-                            // If this scenario is currently being edited in the raw JSON editor, keep it in sync!
-                            if (editingScenario?.scenarioName === scenario.scenarioName) {
-                              updateCustomPayload(JSON.stringify(updatedPayload, null, 2));
-                            }
-                            loadScenarios(selectedEndpoint.id);
-                          }}
-                        />
-                      ))
-                    ) : (
-                      <Card className="p-8 text-center" data-testid="card-no-scenarios">
-                        <p className="text-muted-foreground text-sm">
-                          No saved test cases in PostgreSQL for this endpoint. Click "Generate AI Test Cases" or create one manually!
-                        </p>
-                      </Card>
+                              setSelectedScenarios(newSelected);
+                            }}
+                            onLoadIntoEditor={() => {
+                              updateCustomPayload(JSON.stringify(scenario.payload || {}, null, 2));
+                              setEditingScenario(scenario);
+                              if (scenario.pathParams) {
+                                setPathParams(scenario.pathParams);
+                              }
+                              if (scenario.queryParams) {
+                                setQueryParams(scenario.queryParams);
+                              }
+                              toast.success(`Loaded "${scenario.scenarioName}" into JSON Editor and Params for editing`);
+                            }}
+                            onDelete={async () => {
+                              if (scenario.id) {
+                                try {
+                                  await deleteCustomScenario(scenario.id);
+                                  toast.success('Deleted test case from database.');
+                                  loadScenarios(selectedEndpoint.id);
+                                } catch {
+                                  toast.error('Failed to delete custom scenario.');
+                                }
+                              }
+                            }}
+                            onUpdatePayload={async (updatedPayload, updatedExpected, updatedTag, updatedPath, updatedQuery) => {
+                              await saveCustomScenario({
+                                workspaceId: specId || '',
+                                endpointId: selectedEndpoint.id,
+                                scenarioName: scenario.scenarioName,
+                                expectedResult: updatedExpected,
+                                payload: updatedPayload,
+                                generationRule: updatedTag || scenario.generationRule,
+                                pathParams: updatedPath || scenario.pathParams,
+                                queryParams: updatedQuery || scenario.queryParams,
+                              });
+                              // If this scenario is currently being edited in the raw JSON editor, keep it in sync!
+                              if (editingScenario?.scenarioName === scenario.scenarioName) {
+                                updateCustomPayload(JSON.stringify(updatedPayload, null, 2));
+                                if (updatedPath) setPathParams(updatedPath);
+                                if (updatedQuery) setQueryParams(updatedQuery);
+                              }
+                              loadScenarios(selectedEndpoint.id);
+                            }}
+                          />
+                        ))
+                      ) : (
+                        <Card className="p-8 text-center" data-testid="card-no-scenarios">
+                          <p className="text-muted-foreground text-sm">
+                            No saved test cases in PostgreSQL for this endpoint. Click "Generate AI Test Cases" or create one manually!
+                          </p>
+                        </Card>
+                      )
                     )}
                   </div>
                 </TabsContent>

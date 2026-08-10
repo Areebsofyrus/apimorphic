@@ -300,6 +300,7 @@ return this.executionLogRepository
       body.schema,
       body.path || '',
       body.method || '',
+      body.parameters,
     );
     
     if (body.enrichWithAi) {

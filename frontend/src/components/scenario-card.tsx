@@ -67,7 +67,13 @@ interface ScenarioCardProps {
   onLoadIntoEditor?: () => void;
   onDelete?: () => void;
   onSave?: () => void;
-  onUpdatePayload?: (updatedPayload: Record<string, unknown>, updatedExpectedResult: string, updatedTag: string) => Promise<void>;
+  onUpdatePayload?: (
+    updatedPayload: Record<string, unknown>,
+    updatedExpectedResult: string,
+    updatedTag: string,
+    updatedPathParams?: Record<string, string>,
+    updatedQueryParams?: Record<string, string>
+  ) => Promise<void>;
 }
 
 const RULE_COLORS: Record<string, string> = {
@@ -94,13 +100,17 @@ export function ScenarioCard({
   const [localPayload, setLocalPayload] = useState(JSON.stringify(scenario.payload || {}, null, 2));
   const [localExpectedResult, setLocalExpectedResult] = useState(scenario.expectedResult || '');
   const [localTag, setLocalTag] = useState(scenario.generationRule || 'manual');
+  const [localPathParams, setLocalPathParams] = useState(JSON.stringify(scenario.pathParams || {}, null, 2));
+  const [localQueryParams, setLocalQueryParams] = useState(JSON.stringify(scenario.queryParams || {}, null, 2));
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     setLocalPayload(JSON.stringify(scenario.payload || {}, null, 2));
     setLocalExpectedResult(scenario.expectedResult || '');
     setLocalTag(scenario.generationRule || 'manual');
-  }, [scenario.payload, scenario.expectedResult, scenario.generationRule]);
+    setLocalPathParams(JSON.stringify(scenario.pathParams || {}, null, 2));
+    setLocalQueryParams(JSON.stringify(scenario.queryParams || {}, null, 2));
+  }, [scenario.payload, scenario.expectedResult, scenario.generationRule, scenario.pathParams, scenario.queryParams]);
 
   return (
     <Card className="p-4" data-testid={`card-scenario-${scenario.scenarioName.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -251,6 +261,30 @@ export function ScenarioCard({
                   onChange={(e) => setLocalPayload(e.target.value)}
                 />
               </div>
+              {scenario.pathParams && Object.keys(scenario.pathParams).length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Path Parameters JSON
+                  </label>
+                  <textarea
+                    className="w-full h-20 p-2 font-mono text-xs bg-slate-950 text-slate-100 rounded-lg border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                    value={localPathParams}
+                    onChange={(e) => setLocalPathParams(e.target.value)}
+                  />
+                </div>
+              )}
+              {scenario.queryParams && Object.keys(scenario.queryParams).length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                    Query Parameters JSON
+                  </label>
+                  <textarea
+                    className="w-full h-20 p-2 font-mono text-xs bg-slate-950 text-slate-100 rounded-lg border border-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-y"
+                    value={localQueryParams}
+                    onChange={(e) => setLocalQueryParams(e.target.value)}
+                  />
+                </div>
+              )}
               {scenario.assertions && scenario.assertions.length > 0 && (
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
@@ -274,7 +308,9 @@ export function ScenarioCard({
                       try {
                         setIsUpdating(true);
                         const parsed = JSON.parse(localPayload);
-                        await onUpdatePayload(parsed, localExpectedResult, localTag);
+                        const parsedPath = localPathParams ? JSON.parse(localPathParams) : undefined;
+                        const parsedQuery = localQueryParams ? JSON.parse(localQueryParams) : undefined;
+                        await onUpdatePayload(parsed, localExpectedResult, localTag, parsedPath, parsedQuery);
                         toast.success('Scenario updated successfully!');
                       } catch {
                         toast.error('Invalid JSON format. Please verify syntax.');

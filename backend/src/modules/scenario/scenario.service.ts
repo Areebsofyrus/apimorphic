@@ -113,6 +113,49 @@ export class ScenarioService {
     return 'generic';
   }
 
+  private generatePrimitive(itemSchema: any, key: string, forceRandom: boolean): any {
+    const useExample = itemSchema.example !== undefined && !forceRandom;
+    if (itemSchema.type === 'string') {
+      return useExample ? itemSchema.example : `${key}_item_${Math.floor(Math.random() * 1000)}`;
+    }
+    if (itemSchema.type === 'number' || itemSchema.type === 'integer') {
+      return useExample ? itemSchema.example : Math.floor(Math.random() * 90 + 10);
+    }
+    if (itemSchema.type === 'boolean') {
+      return Math.random() > 0.5;
+    }
+    return `${key}_item`;
+  }
+
+  private generateValueForParamSchema(paramSchema: Record<string, any> | undefined, name: string): string {
+    if (!paramSchema) {
+      if (name.toLowerCase().includes('id')) {
+        return `id_${Math.random().toString(36).substr(2, 9)}`;
+      }
+      return `${name}_val`;
+    }
+    if (paramSchema.example !== undefined) return String(paramSchema.example);
+    if (paramSchema.default !== undefined) return String(paramSchema.default);
+    
+    const type = paramSchema.type;
+    if (type === 'string') {
+      if (name.toLowerCase().includes('email') || name.toLowerCase().includes('mail')) {
+        return `user_${Math.floor(Math.random() * 9000 + 1000)}@example.com`;
+      }
+      if (name.toLowerCase().includes('id')) {
+        return `id_${Math.random().toString(36).substr(2, 9)}`;
+      }
+      return `${name}_val`;
+    }
+    if (type === 'number' || type === 'integer') {
+      return String(Math.floor(Math.random() * 90 + 10));
+    }
+    if (type === 'boolean') {
+      return Math.random() > 0.5 ? 'true' : 'false';
+    }
+    return `${name}_val`;
+  }
+
   private async injectDatasetValues(
     schema: Record<string, unknown>,
     forceRandom = false
@@ -190,9 +233,17 @@ export class ScenarioService {
         } else if (prop.type === 'boolean') {
           payload[key] = Math.random() > 0.5;
         } else if (prop.type === 'array') {
-          payload[key] = [];
+          if (prop.items && typeof prop.items === 'object') {
+            if (prop.items.type === 'object') {
+              payload[key] = [await this.injectDatasetValues(prop.items, forceRandom)];
+            } else {
+              payload[key] = [this.generatePrimitive(prop.items, key, forceRandom)];
+            }
+          } else {
+            payload[key] = [];
+          }
         } else if (prop.type === 'object') {
-          payload[key] = {};
+          payload[key] = await this.injectDatasetValues(prop, forceRandom);
         } else {
           payload[key] = `${key}_val_${Math.floor(Math.random() * 1000)}`;
         }
@@ -206,159 +257,260 @@ export class ScenarioService {
     schema: Record<string, unknown>,
     path: string,
     method: string,
+    parameters?: Array<{
+      name: string;
+      in: 'query' | 'header' | 'path' | 'cookie' | 'body';
+      required?: boolean;
+      schema?: Record<string, unknown>;
+    }>,
   ): Promise<GeneratedScenario[]> {
     const scenarios: GeneratedScenario[] = [];
     const properties = (schema.properties as Record<string, any>) || {};
     const category = this.getEndpointCategory(path, method);
 
-    // 1. Valid Payload (Standard) - uses dataset injection
-    const validPayload = await this.injectDatasetValues(schema, false);
+    const queryParamsList = (parameters || []).filter(p => p.in === 'query');
+    const pathParamsList = (parameters || []).filter(p => p.in === 'path');
+
+    const baseQueryParams: Record<string, string> = {};
+    const basePathParams: Record<string, string> = {};
+
+    queryParamsList.forEach(p => {
+      baseQueryParams[p.name] = this.generateValueForParamSchema(p.schema, p.name);
+    });
+
+    pathParamsList.forEach(p => {
+      basePathParams[p.name] = this.generateValueForParamSchema(p.schema, p.name);
+    });
+
+    const hasBodyPayload = Object.keys(properties).length > 0;
+
+    // 1. Valid Request (Standard)
+    const validPayload = hasBodyPayload ? await this.injectDatasetValues(schema, false) : {};
     scenarios.push({
-      scenarioName: 'Valid Payload (Standard)',
+      scenarioName: hasBodyPayload ? 'Valid Payload (Standard)' : 'Valid Request (Standard)',
       generationRule: 'valid',
       expectedResult: category === 'write' ? '201 Created' : '200 OK',
       payload: validPayload,
+      queryParams: baseQueryParams,
+      pathParams: basePathParams,
     });
 
-    // 2. Valid Payload (Alternative Randomization) - pure randomized values
-    const validAltPayload = await this.injectDatasetValues(schema, true);
-    // Mutate slightly to guarantee difference
-    Object.keys(validAltPayload).forEach((k) => {
-      const val = validAltPayload[k];
-      if (typeof val === 'string' && !val.includes('@')) {
-        validAltPayload[k] = `${val}_alt`;
-      } else if (typeof val === 'number') {
-        validAltPayload[k] = val + 5;
-      }
-    });
+    if (hasBodyPayload) {
+      // 2. Valid Payload (Alternative Randomization)
+      const validAltPayload = await this.injectDatasetValues(schema, true);
+      Object.keys(validAltPayload).forEach((k) => {
+        const val = validAltPayload[k];
+        if (typeof val === 'string' && !val.includes('@')) {
+          validAltPayload[k] = `${val}_alt`;
+        } else if (typeof val === 'number') {
+          validAltPayload[k] = val + 5;
+        }
+      });
 
-    // Determine context-aware outcome for randomized happy payload
-    let altExpected = '200 OK';
-    if (category === 'auth') {
-      const lowerP = path.toLowerCase();
-      if (lowerP.includes('login') || lowerP.includes('token') || lowerP.includes('signin') || lowerP.includes('auth')) {
-        altExpected = '401 Unauthorized';
-      } else if (lowerP.includes('forgot') || lowerP.includes('reset') || lowerP.includes('password') || lowerP.includes('otp')) {
-        altExpected = '400 Bad Request';
-      } else {
-        altExpected = '401 Unauthorized';
+      let altExpected = '200 OK';
+      if (category === 'auth') {
+        const lowerP = path.toLowerCase();
+        if (lowerP.includes('login') || lowerP.includes('token') || lowerP.includes('signin') || lowerP.includes('auth')) {
+          altExpected = '401 Unauthorized';
+        } else if (lowerP.includes('forgot') || lowerP.includes('reset') || lowerP.includes('password') || lowerP.includes('otp')) {
+          altExpected = '400 Bad Request';
+        } else {
+          altExpected = '401 Unauthorized';
+        }
+      } else if (category === 'read') {
+        altExpected = '404 Not Found';
+      } else if (category === 'write') {
+        altExpected = '201 Created';
       }
-    } else if (category === 'read') {
-      altExpected = '404 Not Found';
-    } else if (category === 'write') {
-      altExpected = '201 Created';
+
+      scenarios.push({
+        scenarioName: 'Valid Payload (Alternative Randomization)',
+        generationRule: 'valid_alternative',
+        expectedResult: altExpected,
+        payload: validAltPayload,
+        queryParams: baseQueryParams,
+        pathParams: basePathParams,
+      });
+
+      // 3. Missing Properties (Optional fields omitted)
+      const keys = Object.keys(validPayload);
+      if (keys.length > 1) {
+        const omittedPayload = { ...validPayload };
+        const omitKey = keys[Math.floor(Math.random() * keys.length)];
+        delete omittedPayload[omitKey];
+        scenarios.push({
+          scenarioName: `Missing Field: Omit "${omitKey}"`,
+          generationRule: 'missing_field',
+          expectedResult: '400 Bad Request',
+          payload: omittedPayload,
+          queryParams: baseQueryParams,
+          pathParams: basePathParams,
+        });
+      }
+
+      // 4. Type Mismatch (Number fields sent as string)
+      const typeMismatchPayload = { ...validPayload };
+      let mutatedType = false;
+      Object.entries(properties).forEach(([key, prop]) => {
+        if ((prop.type === 'number' || prop.type === 'integer') && typeMismatchPayload[key] !== undefined) {
+          typeMismatchPayload[key] = `not_a_number_${typeMismatchPayload[key]}`;
+          mutatedType = true;
+        }
+      });
+      if (mutatedType) {
+        scenarios.push({
+          scenarioName: 'Type Mismatch (Numeric as String)',
+          generationRule: 'type_mismatch',
+          expectedResult: '400 Bad Request',
+          payload: typeMismatchPayload,
+          queryParams: baseQueryParams,
+          pathParams: basePathParams,
+        });
+      }
+
+      // 5. Boundary Case (Minimum/Zero Limits)
+      const boundaryPayload = { ...validPayload };
+      Object.entries(properties).forEach(([key, prop]) => {
+        if (prop.type === 'number' || prop.type === 'integer') {
+          boundaryPayload[key] = 0;
+        } else if (prop.type === 'string') {
+          boundaryPayload[key] = '';
+        } else if (prop.type === 'array') {
+          boundaryPayload[key] = [];
+        }
+      });
+      scenarios.push({
+        scenarioName: 'Boundary Limits (Zero & Empty)',
+        generationRule: 'boundary',
+        expectedResult: '400 Bad Request',
+        payload: boundaryPayload,
+        queryParams: baseQueryParams,
+        pathParams: basePathParams,
+      });
+
+      // 6. SQL Injection Attack
+      const sqliPayload = { ...validPayload };
+      Object.keys(sqliPayload).forEach((k) => {
+        if (typeof sqliPayload[k] === 'string') {
+          sqliPayload[k] = "' OR '1'='1' --";
+        }
+      });
+      scenarios.push({
+        scenarioName: 'SQL Injection Vulnerability Test',
+        generationRule: 'security-sqli',
+        expectedResult: '400 Bad Request',
+        payload: sqliPayload,
+        queryParams: baseQueryParams,
+        pathParams: basePathParams,
+      });
+
+      // 7. XSS Script Injection
+      const xssPayload = { ...validPayload };
+      Object.keys(xssPayload).forEach((k) => {
+        if (typeof xssPayload[k] === 'string') {
+          xssPayload[k] = '<script>alert("XSS")</script>';
+        }
+      });
+      scenarios.push({
+        scenarioName: 'Cross-Site Scripting (XSS) Test',
+        generationRule: 'security-xss',
+        expectedResult: '400 Bad Request',
+        payload: xssPayload,
+        queryParams: baseQueryParams,
+        pathParams: basePathParams,
+      });
+
+      // 8. Path Traversal Payload
+      const traversalPayload = { ...validPayload };
+      Object.keys(traversalPayload).forEach((k) => {
+        if (typeof traversalPayload[k] === 'string') {
+          traversalPayload[k] = '../../../../etc/passwd';
+        }
+      });
+      scenarios.push({
+        scenarioName: 'Path Traversal Vulnerability Test',
+        generationRule: 'ai-edge-case',
+        expectedResult: '400 Bad Request',
+        payload: traversalPayload,
+        queryParams: baseQueryParams,
+        pathParams: basePathParams,
+      });
+
+      // 9. Null Values Injection
+      const nullPayload = { ...validPayload };
+      Object.keys(nullPayload).forEach((k) => {
+        nullPayload[k] = null;
+      });
+      scenarios.push({
+        scenarioName: 'Null Values Inject (All Fields)',
+        generationRule: 'null-injection',
+        expectedResult: '400 Bad Request',
+        payload: nullPayload,
+        queryParams: baseQueryParams,
+        pathParams: basePathParams,
+      });
     }
 
-    scenarios.push({
-      scenarioName: 'Valid Payload (Alternative Randomization)',
-      generationRule: 'valid_alternative',
-      expectedResult: altExpected,
-      payload: validAltPayload,
-    });
-
-    // 3. Missing Properties (Optional fields omitted)
-    const keys = Object.keys(validPayload);
-    if (keys.length > 1) {
-      const omittedPayload = { ...validPayload };
-      const omitKey = keys[Math.floor(Math.random() * keys.length)];
-      delete omittedPayload[omitKey];
+    // Generate specific parameters test cases (especially if no body, but also if params are defined)
+    // 10. Missing Required Query Parameters
+    queryParamsList.filter(p => p.required).forEach(p => {
+      const queryCopy = { ...baseQueryParams };
+      delete queryCopy[p.name];
       scenarios.push({
-        scenarioName: `Missing Field: Omit "${omitKey}"`,
+        scenarioName: `Missing Required Query Param: "${p.name}"`,
         generationRule: 'missing_field',
         expectedResult: '400 Bad Request',
-        payload: omittedPayload,
+        payload: hasBodyPayload ? validPayload : {},
+        queryParams: queryCopy,
+        pathParams: basePathParams,
       });
-    }
-
-    // 4. Type Mismatch (Number fields sent as string)
-    const typeMismatchPayload = { ...validPayload };
-    let mutatedType = false;
-    Object.entries(properties).forEach(([key, prop]) => {
-      if ((prop.type === 'number' || prop.type === 'integer') && typeMismatchPayload[key] !== undefined) {
-        typeMismatchPayload[key] = `not_a_number_${typeMismatchPayload[key]}`;
-        mutatedType = true;
-      }
     });
-    if (mutatedType) {
+
+    // 11. Invalid Path Parameters (Not Found / Incorrect pattern)
+    pathParamsList.forEach(p => {
+      const pathCopy = { ...basePathParams };
+      pathCopy[p.name] = `${pathCopy[p.name]}_notfound`;
       scenarios.push({
-        scenarioName: 'Type Mismatch (Numeric as String)',
-        generationRule: 'type_mismatch',
+        scenarioName: `Not Found Path Param: "${p.name}"`,
+        generationRule: 'ai-edge-case',
+        expectedResult: '404 Not Found',
+        payload: hasBodyPayload ? validPayload : {},
+        queryParams: baseQueryParams,
+        pathParams: pathCopy,
+      });
+    });
+
+    // 12. SQL Injection / XSS in parameters (if query parameters exist)
+    let hasStringQuery = false;
+    const sqliQuery = { ...baseQueryParams };
+    const xssQuery = { ...baseQueryParams };
+
+    queryParamsList.forEach(p => {
+      if (!p.schema || p.schema.type === 'string') {
+        sqliQuery[p.name] = "' OR '1'='1' --";
+        xssQuery[p.name] = '<script>alert("XSS")</script>';
+        hasStringQuery = true;
+      }
+    });
+
+    if (hasStringQuery) {
+      scenarios.push({
+        scenarioName: 'SQL Injection in Query Params',
+        generationRule: 'security-sqli',
         expectedResult: '400 Bad Request',
-        payload: typeMismatchPayload,
+        payload: hasBodyPayload ? validPayload : {},
+        queryParams: sqliQuery,
+        pathParams: basePathParams,
+      });
+      scenarios.push({
+        scenarioName: 'XSS in Query Params',
+        generationRule: 'security-xss',
+        expectedResult: '400 Bad Request',
+        payload: hasBodyPayload ? validPayload : {},
+        queryParams: xssQuery,
+        pathParams: basePathParams,
       });
     }
-
-    // 5. Boundary Case (Minimum/Zero Limits)
-    const boundaryPayload = { ...validPayload };
-    Object.entries(properties).forEach(([key, prop]) => {
-      if (prop.type === 'number' || prop.type === 'integer') {
-        boundaryPayload[key] = 0;
-      } else if (prop.type === 'string') {
-        boundaryPayload[key] = '';
-      } else if (prop.type === 'array') {
-        boundaryPayload[key] = [];
-      }
-    });
-    scenarios.push({
-      scenarioName: 'Boundary Limits (Zero & Empty)',
-      generationRule: 'boundary',
-      expectedResult: '400 Bad Request',
-      payload: boundaryPayload,
-    });
-
-    // 6. SQL Injection Attack
-    const sqliPayload = { ...validPayload };
-    Object.keys(sqliPayload).forEach((k) => {
-      if (typeof sqliPayload[k] === 'string') {
-        sqliPayload[k] = "' OR '1'='1' --";
-      }
-    });
-    scenarios.push({
-      scenarioName: 'SQL Injection Vulnerability Test',
-      generationRule: 'security-sqli',
-      expectedResult: '400 Bad Request',
-      payload: sqliPayload,
-    });
-
-    // 7. XSS Script Injection
-    const xssPayload = { ...validPayload };
-    Object.keys(xssPayload).forEach((k) => {
-      if (typeof xssPayload[k] === 'string') {
-        xssPayload[k] = '<script>alert("XSS")</script>';
-      }
-    });
-    scenarios.push({
-      scenarioName: 'Cross-Site Scripting (XSS) Test',
-      generationRule: 'security-xss',
-      expectedResult: '400 Bad Request',
-      payload: xssPayload,
-    });
-
-    // 8. Path Traversal Payload
-    const traversalPayload = { ...validPayload };
-    Object.keys(traversalPayload).forEach((k) => {
-      if (typeof traversalPayload[k] === 'string') {
-        traversalPayload[k] = '../../../../etc/passwd';
-      }
-    });
-    scenarios.push({
-      scenarioName: 'Path Traversal Vulnerability Test',
-      generationRule: 'ai-edge-case',
-      expectedResult: '400 Bad Request',
-      payload: traversalPayload,
-    });
-
-    // 9. Null Values Injection
-    const nullPayload = { ...validPayload };
-    Object.keys(nullPayload).forEach((k) => {
-      nullPayload[k] = null;
-    });
-    scenarios.push({
-      scenarioName: 'Null Values Inject (All Fields)',
-      generationRule: 'null-injection',
-      expectedResult: '400 Bad Request',
-      payload: nullPayload,
-    });
 
     return scenarios;
   }
@@ -411,7 +563,7 @@ Rules:
 4. Use mapped values whenever provided.
 5. Cover:
   - Happy path
-  - Required field validation
+  - Required field/parameter validation
   - Boundary values
   - Invalid data
   - Authentication & Authorization
@@ -419,14 +571,15 @@ Rules:
   - Data mapping validation
   - Response validation
   - Security
-  - Concurrency (if applicable)
 
 For every test case, you MUST return a JSON object with these EXACT keys:
 - "Title": string (Brief scenario name)
 - "Priority": "Critical" | "High" | "Medium" | "Low"
 - "Category": string (e.g. "Functional", "Security", "Validation")
 - "Description": string (Explanation of the scenario and why it is tested)
-- "Request Payload": object (A complete, realistic request payload that matches the endpoint schema. Ensure all fields are realistic)
+- "Request Payload": object (A complete, realistic request payload that matches the endpoint schema. Ensure all fields are realistic. Return empty object {} if endpoint has no body schema)
+- "Query Parameters": object (Flat object containing query parameter key-value pairs matching parameter list. Return empty object {} if none)
+- "Path Parameters": object (Flat object containing path parameter key-value pairs matching path parameter list. Return empty object {} if none)
 - "Expected HTTP Status": number (e.g. 200, 201, 400, 401, 403, 404)
 - "Expected Result": string (Explanation of the expected outcome)
 - "Assertions": string[] (Array of assertions, e.g. ["status is 200", "body.id is present"])
@@ -435,7 +588,8 @@ Only generate test cases that add unique coverage.
 Return ONLY valid JSON array of objects. Do NOT include markdown code block formatting (such as \`\`\`json) or conversational text. Return only the raw JSON array.`;
 
       const userPrompt = `Generate an AI-enriched test suite for API endpoint '${method.toUpperCase()} ${endpointPath}' (${endpointSummary || ''}) matching schema: ${JSON.stringify(schema)}.
-${Object.keys(mappingInfo).length > 0 ? `Use these valid mapped database values in payload keys if they are defined: ${JSON.stringify(mappingInfo)}` : ''}
+Parameters: ${JSON.stringify(parameters || [])}.
+${Object.keys(mappingInfo).length > 0 ? `Use these valid mapped database values in payload/query/path keys if they are defined: ${JSON.stringify(mappingInfo)}` : ''}
 
 Ensure output is a valid JSON array of objects following the system format instructions.`;
 
@@ -465,6 +619,8 @@ Ensure output is a valid JSON array of objects following the system format instr
           generationRule: 'ai_enriched',
           expectedResult: `${item['Expected HTTP Status'] || 200} ${item['Expected Result'] || 'OK'}`,
           payload: item['Request Payload'] || {},
+          queryParams: item['Query Parameters'] || {},
+          pathParams: item['Path Parameters'] || {},
           priority: item.Priority || 'Medium',
           category: item.Category || 'Functional',
           description: item.Description || '',
@@ -541,9 +697,17 @@ Ensure output is a valid JSON array of objects following the system format instr
       } else if (prop.type === 'boolean') {
         payload[key] = Math.random() > 0.5;
       } else if (prop.type === 'array') {
-        payload[key] = [];
+        if (prop.items && typeof prop.items === 'object') {
+          if (prop.items.type === 'object') {
+            payload[key] = [this.buildValidBasePayload(prop.items, forceRandom)];
+          } else {
+            payload[key] = [this.generatePrimitive(prop.items, key, forceRandom)];
+          }
+        } else {
+          payload[key] = [];
+        }
       } else if (prop.type === 'object') {
-        payload[key] = {};
+        payload[key] = this.buildValidBasePayload(prop, forceRandom);
       } else {
         payload[key] = `${key}_val_${Math.floor(Math.random() * 1000)}`;
       }
