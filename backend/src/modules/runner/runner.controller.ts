@@ -356,4 +356,36 @@ return this.executionLogRepository
     });
     return { success: true };
   }
+
+  @Post('update-endpoint-schema')
+  async updateEndpointSchema(
+    @Req() req: any,
+    @Body() body: { workspaceId: string; endpointId: string; requestSchema: Record<string, any> }
+  ) {
+    if (!body.workspaceId || !body.endpointId || !body.requestSchema) {
+      throw new BadRequestException('workspaceId, endpointId, and requestSchema are required');
+    }
+    const workspace = await this.specRepository.findOne({
+      where: { id: body.workspaceId, user: { id: req.user.userId } },
+    });
+    if (!workspace) {
+      throw new NotFoundException('Workspace not found or unauthorized');
+    }
+
+    let updated = false;
+    workspace.endpoints = workspace.endpoints.map(endpoint => {
+      if (endpoint.id === body.endpointId) {
+        endpoint.requestSchema = body.requestSchema;
+        updated = true;
+      }
+      return endpoint;
+    });
+
+    if (!updated) {
+      throw new NotFoundException('Endpoint not found in this workspace');
+    }
+
+    await this.specRepository.save(workspace);
+    return { success: true, requestSchema: body.requestSchema };
+  }
 }

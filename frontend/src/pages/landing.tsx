@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Play, HelpCircle, Zap, FileInput, Database, LayoutDashboard, Sparkles, CheckCircle2, ShieldCheck, Cpu, Info, ArrowUpRight, Terminal, ShieldAlert } from 'lucide-react';
+import { Play, HelpCircle, Zap, FileInput, Database, LayoutDashboard, Sparkles, CheckCircle2, ShieldCheck, Cpu, Info, ArrowUpRight, Terminal, ShieldAlert, Sun, Moon } from 'lucide-react';
 import APIMorphicLogo from '@/components/apimorphic-logo';
 import RobonitoLogo from '@/components/robonito-logo';
 import { Button } from '@/components/ui/button';

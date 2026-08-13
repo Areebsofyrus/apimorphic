@@ -20,6 +20,9 @@ export class UserEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   geminiApiKey?: string | null;
 
+  @Column({ type: 'varchar', length: 255, default: 'user' })
+  role!: string;
+
   @OneToMany(() => ApiSpecEntity, (workspace) => workspace.user, { cascade: true })
   workspaces!: ApiSpecEntity[];
 

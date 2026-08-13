@@ -8,7 +8,7 @@ import RobonitoLogo from '@/components/robonito-logo';
 import APIMorphicLogo from '@/components/apimorphic-logo';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Zap, FileInput, Database, BarChart3, Loader2, RefreshCw, Layers, Link, Trash2, Eye, EyeOff, LogOut, Settings, MoreVertical, ChevronDown, User, LayoutDashboard, HelpCircle } from 'lucide-react';
+import { Zap, FileInput, Database, BarChart3, Loader2, RefreshCw, Layers, Link, Trash2, Eye, EyeOff, LogOut, Settings, MoreVertical, ChevronDown, User, LayoutDashboard, HelpCircle, ShieldAlert, Sun, Moon } from 'lucide-react';
 import ApiTestingStudio from '@/pages/api-testing-studio';
 import SpecImport from '@/pages/spec-import';
 import DatasetsMappings from '@/pages/datasets-mappings';
@@ -16,6 +16,7 @@ import AiDiagnostics from '@/pages/ai-diagnostics';
 import Login from '@/pages/login';
 import Landing from '@/pages/landing';
 import SystemGuide from '@/pages/system-guide';
+import SuperAdmin from '@/pages/super-admin';
 import ProfilesSheet from '@/components/profiles-sheet';
 import {
   DropdownMenu,
@@ -47,8 +48,13 @@ function App() {
   }
 
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('tester_jwt_token'));
-  const [user, setUser] = useState<{ id: string; email: string; name?: string; geminiApiKey?: string } | null>(null);
+  const [user, setUser] = useState<{ id: string; email: string; name?: string; role?: string; geminiApiKey?: string } | null>(null);
   const [showProfilesModal, setShowProfilesModal] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.remove('dark');
+    localStorage.removeItem('tester_theme');
+  }, []);
 
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [workspaces, setWorkspaces] = useState<any[]>([]);
@@ -376,8 +382,6 @@ function App() {
                   </div>
                 )}
 
-                <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800" />
-
                 {/* System Settings Popover */}
                 <Popover>
                   <PopoverTrigger asChild>
@@ -516,6 +520,16 @@ function App() {
                   <LayoutDashboard className="h-3.5 w-3.5" />
                   Dashboard
                 </TabsTrigger>
+                {user?.role === 'superadmin' && (
+                  <TabsTrigger
+                    value="super-admin"
+                    className="data-[state=active]:text-indigo-600 data-[state=active]:border-indigo-600 border-b-2 border-transparent h-12 px-1 rounded-none shadow-none font-semibold text-slate-500 hover:text-slate-850 dark:hover:text-slate-300 transition-all flex items-center gap-2 cursor-pointer text-xs uppercase tracking-wider"
+                    data-testid="tab-super-admin"
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5 text-pink-500" />
+                    Super Admin
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
 
@@ -576,6 +590,12 @@ function App() {
             <TabsContent value="diagnostics" className="flex-1 m-0 p-0">
               <AiDiagnostics endpoints={endpoints} />
             </TabsContent>
+
+            {user?.role === 'superadmin' && (
+              <TabsContent value="super-admin" className="flex-1 m-0 p-0">
+                <SuperAdmin />
+              </TabsContent>
+            )}
           </Tabs>
         </div>
         <ProfilesSheet

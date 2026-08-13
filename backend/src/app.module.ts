@@ -22,6 +22,7 @@ import { SmartMappingEntity } from './entities/smart-mapping.entity';
 import { ExecutionLogEntity } from './entities/execution-log.entity';
 import { SavedTestCaseEntity } from './entities/saved-test-case.entity';
 import { AuthModule } from './modules/auth/auth.module';
+import { SuperAdminModule } from './modules/super-admin/super-admin.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { AuthModule } from './modules/auth/auth.module';
       SavedTestCaseEntity,
     ]),
     AuthModule,
+    SuperAdminModule,
   ],
   controllers: [ParserController, RunnerController, DatasetController, IntelligenceController, ScenarioController],
   providers: [

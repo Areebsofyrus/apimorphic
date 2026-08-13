@@ -14,7 +14,7 @@ import { ExecutionResultCard } from '@/components/execution-result-card';
 import { MethodBadge } from '@/components/method-badge';
 import { Endpoint, Scenario, ExecutionResult } from '@/types/api';
 import { MOCK_SCENARIOS } from '@/lib/mock-data';
-import { executeTest, generateScenarios, fetchMappings, fetchDatasets, fetchCustomScenarios, saveCustomScenario, deleteCustomScenario, updateWorkspaceBaseUrl, fetchEndpointHistory, clearEndpointHistory, deleteExecutionLog } from '@/lib/api-client';
+import { executeTest, generateScenarios, fetchMappings, fetchDatasets, fetchCustomScenarios, saveCustomScenario, deleteCustomScenario, updateWorkspaceBaseUrl, fetchEndpointHistory, clearEndpointHistory, deleteExecutionLog, updateEndpointSchema } from '@/lib/api-client';
 import { toast } from 'sonner';
 
 const DEFAULT_BASE_URL = (import.meta as any).env.VITE_TARGET_BASE_URL ?? 'https://httpbin.org';
@@ -308,9 +308,12 @@ export default function ApiTestingStudio({
     }
   };
 
+  const [localSchemaText, setLocalSchemaText] = useState('{\n  "type": "object",\n  "properties": {}\n}');
+
   useEffect(() => {
     if (selectedEndpoint) {
       loadEndpointHistory(selectedEndpoint.path, selectedEndpoint.method);
+      setLocalSchemaText(JSON.stringify(selectedEndpoint.requestSchema || { type: 'object', properties: {} }, null, 2));
     }
   }, [selectedEndpoint]);
   const [mappings, setMappings] = useState<any[]>([]);
@@ -1264,6 +1267,7 @@ export default function ApiTestingStudio({
                   <TabsList>
                     <TabsTrigger value="scenarios" data-testid="tab-scenarios">Scenario Suite</TabsTrigger>
                     <TabsTrigger value="payload" data-testid="tab-payload">JSON Payload Editor</TabsTrigger>
+                    <TabsTrigger value="schema" data-testid="tab-schema">Request Schema JSON</TabsTrigger>
                   </TabsList>
                   <TabsContent value="scenarios" className="space-y-4 mt-4">
                   {/* Action Bar for AI Generation and Manual Adding */}
@@ -1923,6 +1927,42 @@ export default function ApiTestingStudio({
                       </div>
                     </Card>
                   </div>
+                </TabsContent>
+                <TabsContent value="schema" className="mt-4">
+                  <Card className="p-4 space-y-4">
+                    <div className="flex justify-between items-center flex-wrap gap-2">
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                          Request Schema JSON Editor
+                        </h4>
+                        <p className="text-[10px] text-slate-500">
+                          Edit the OpenAPI JSON schema for this endpoint to feed details to AI & generators.
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs h-8 flex items-center gap-1 shadow-sm cursor-pointer"
+                        onClick={async () => {
+                          if (!selectedEndpoint || !specId) return;
+                          try {
+                            const parsedSchema = JSON.parse(localSchemaText);
+                            await updateEndpointSchema(specId, selectedEndpoint.id, parsedSchema);
+                            selectedEndpoint.requestSchema = parsedSchema;
+                            toast.success('Schema saved successfully to workspace!');
+                          } catch (err: any) {
+                            toast.error(`Invalid JSON formatting: ${err.message}`);
+                          }
+                        }}
+                      >
+                        <Save className="h-3.5 w-3.5" /> Save Schema
+                      </Button>
+                    </div>
+                    <Textarea
+                      className="font-mono text-xs min-h-[400px] bg-slate-950 text-slate-100 border-slate-800 focus:ring-1 focus:ring-indigo-500"
+                      value={localSchemaText}
+                      onChange={(e) => setLocalSchemaText(e.target.value)}
+                    />
+                  </Card>
                 </TabsContent>
               </Tabs>
             </>

@@ -394,3 +394,73 @@ export async function clearEndpointHistory(endpointPath: string, method: string,
   }
   return response.json();
 }
+
+export async function updateEndpointSchema(workspaceId: string, endpointId: string, requestSchema: object) {
+  const response = await fetchWithAuth(`${API_BASE}/runner/update-endpoint-schema`, {
+    method: 'POST',
+    body: JSON.stringify({ workspaceId, endpointId, requestSchema }),
+  });
+  if (!response.ok) {
+    throw new Error('Failed to update endpoint request schema');
+  }
+  return response.json();
+}
+
+// Super Admin APIs
+export async function fetchAdminStats() {
+  const response = await fetchWithAuth(`${API_BASE}/super-admin/stats`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch admin statistics');
+  }
+  return response.json();
+}
+
+export async function fetchAdminUsers() {
+  const response = await fetchWithAuth(`${API_BASE}/super-admin/users`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch users list');
+  }
+  return response.json();
+}
+
+export async function updateUserRole(userId: string, role: string) {
+  const response = await fetchWithAuth(`${API_BASE}/super-admin/users/${userId}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to update user role');
+  }
+  return response.json();
+}
+
+export async function deleteUser(userId: string) {
+  const response = await fetchWithAuth(`${API_BASE}/super-admin/users/${userId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete user');
+  }
+  return response.json();
+}
+
+export async function fetchAdminWorkspaces() {
+  const response = await fetchWithAuth(`${API_BASE}/super-admin/workspaces`);
+  if (!response.ok) {
+    throw new Error('Failed to fetch workspaces list');
+  }
+  return response.json();
+}
+
+export async function deleteAdminWorkspace(specId: string) {
+  const response = await fetchWithAuth(`${API_BASE}/super-admin/workspaces/${specId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.message || 'Failed to delete workspace spec');
+  }
+  return response.json();
+}

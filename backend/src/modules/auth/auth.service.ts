@@ -29,7 +29,7 @@ export class AuthService {
     return this.userRepository.save(user);
   }
 
-  async login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string; name?: string; geminiApiKey?: string } }> {
+  async login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string; name?: string; role: string; geminiApiKey?: string } }> {
     const cleanEmail = email.trim().toLowerCase();
     const user = await this.userRepository.findOneBy({ email: cleanEmail });
     if (!user) {
@@ -42,7 +42,7 @@ export class AuthService {
     }
 
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, role: user.role },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -53,6 +53,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role,
         geminiApiKey: user.geminiApiKey || undefined,
       },
     };
